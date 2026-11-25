@@ -48,7 +48,7 @@ Test gate
 - [x] Pest: unauthenticated `/me` 401; customer on staff-only endpoint 403
 - [x] Pest: password-reset email sent (Mail fake) and token works once
 - [x] Vitest: login validation; protected route redirects to /login; customers never see staff menu
-- [ ] Manual: customer vs staff navigation differs; refresh keeps session
+- [x] Manual: customer vs staff navigation differs; refresh keeps session
 
 ## Phase 2 - Product catalog and search
 Build: `categories`, `products` (+ attributes). Bearing fields: part number, brand, type, inner diameter, outer diameter, width, material, seal type, price or price on request, stock status. `GET /api/v1/products` with search, filters, sort, pagination; product detail; CSV import command; 200+ seeded products; indexes; React catalog with filter sidebar synced to URL; detail page.
@@ -134,7 +134,7 @@ Test gate
 ---
 
 ## Progress
-- [x] Phase 0  - [ ] Phase 1  - [ ] Phase 2  - [ ] Phase 3  - [ ] Phase 4
+- [x] Phase 0  - [x] Phase 1  - [ ] Phase 2  - [ ] Phase 3  - [ ] Phase 4
 - [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8
 
 ## Rules for every phase
