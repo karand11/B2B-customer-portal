@@ -35,7 +35,7 @@ Build: monorepo, Laravel skeleton with `/api/v1/health`, Vite React TS app, ESLi
 Test gate
 - [x] Pest: `GET /api/v1/health` returns 200 and `{status: ok}`
 - [x] `pint --test`, `npm run lint`, `npm test` pass locally
-- [ ] Web page shows health status from the API (manual)
+- [x] Web page shows health status from the API (manual)
 - [x] CI green on a pushed branch
 - [x] Fresh clone starts using only the README steps
 
@@ -134,7 +134,7 @@ Test gate
 ---
 
 ## Progress
-- [ ] Phase 0  - [ ] Phase 1  - [ ] Phase 2  - [ ] Phase 3  - [ ] Phase 4
+- [x] Phase 0  - [ ] Phase 1  - [ ] Phase 2  - [ ] Phase 3  - [ ] Phase 4
 - [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8
 
 ## Rules for every phase
