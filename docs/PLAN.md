@@ -60,7 +60,7 @@ Test gate
 - [x] Pest: constant query count (no N+1)
 - [x] Pest: CSV import idempotent and reports bad rows
 - [x] Vitest: filters update URL and restore from URL; empty and error states
-- [ ] Manual: 5,000 products list in under 300 ms locally
+- [x] Manual: 5,000 products list in under 300 ms locally
 
 ## Phase 3 - Cart and orders with history
 Build: `orders`, `order_items` (snapshot price/part number/name), statuses pending/confirmed/shipped/delivered/cancelled, cart, `POST /orders`, `GET /orders` (own company), order detail with status timeline, re-order, history filters by status and date.
@@ -134,7 +134,7 @@ Test gate
 ---
 
 ## Progress
-- [x] Phase 0  - [x] Phase 1  - [ ] Phase 2  - [ ] Phase 3  - [ ] Phase 4
+- [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [ ] Phase 3  - [ ] Phase 4
 - [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8
 
 ## Rules for every phase
