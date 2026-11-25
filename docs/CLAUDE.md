@@ -55,4 +55,5 @@ Staff: manage products, orders, quotes, invoices, customers.
 - `backend-engineer`: works only in `api/`.
 - `frontend-engineer`: works only in `web/`.
 - `qa-engineer`: runs gates and e2e tests, reports failures, does not fix feature code.
+- `security-reviewer`: read-only review of each phase's diff after QA passes; high and medium findings must be fixed before the phase is done.
 - Parallel agents must not edit the same files. The API contract in `docs/api-contract.md` is the source of truth.

@@ -6,7 +6,7 @@ Rule: one phase at a time. A phase is finished only when every box in its test g
 
 ## Master prompt (paste into Claude Code)
 
-> Read CLAUDE.md and docs/PLAN.md. Work on Phase N. Enter plan mode and propose the steps, files and tests; wait for my approval. Use the subagents: `architect` writes the API contract first, then `backend-engineer` and `frontend-engineer` work in parallel against it, then `qa-engineer` runs the test gate. Implement test-first and fix failures until the gate is green. Then commit, tick off this file, and stop and wait for me to say "next".
+> Read CLAUDE.md and docs/PLAN.md. Work on Phase N. Enter plan mode and propose the steps, files and tests; wait for my approval. Use the subagents: `architect` writes the API contract first, then `backend-engineer` and `frontend-engineer` work in parallel against it, then `qa-engineer` runs the test gate, then `security-reviewer` reviews the diff. Implement test-first and send any failures or high/medium security findings back to the right agent until the gate is green and the review is clean. Then commit, tick off this file, and stop and wait for me to say "next".
 
 ## Stack
 - Frontend: React + TypeScript, Vite, React Router, TanStack Query, React Hook Form + Zod, Tailwind
