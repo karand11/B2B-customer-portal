@@ -11,7 +11,7 @@ Rule: one phase at a time. A phase is finished only when every box in its test g
 ## Stack
 - Frontend: React + TypeScript, Vite, React Router, TanStack Query, React Hook Form + Zod, Tailwind
 - Backend: Laravel REST API, PHP 8.3, Sanctum SPA auth, spatie/laravel-permission
-- DB: MySQL 8 or PostgreSQL 16 (decide before Phase 0)
+- DB: PostgreSQL 16 (decided)
 - PDF: dompdf. Queue: database driver. Mail: Mailpit locally.
 - Tests: Pest, Vitest + React Testing Library, Playwright
 - CI: GitHub Actions
@@ -21,7 +21,7 @@ v1: roles login, searchable/filterable catalog (size, type, part number), order 
 Out of scope for v1: online payment, ERP sync, multi-currency, live stock reservation.
 
 ## Open questions (settle before Phase 0)
-- [ ] MySQL or PostgreSQL?
+- [x] MySQL or PostgreSQL? PostgreSQL 16
 - [ ] Existing product list (Excel/ERP export) to import?
 - [ ] Currency, VAT rules, invoice legal requirements (language, bank details)?
 - [ ] Hosting and email provider/sender domain?
@@ -33,11 +33,11 @@ Out of scope for v1: online payment, ERP sync, multi-currency, live stock reserv
 Build: monorepo, Laravel skeleton with `/api/v1/health`, Vite React TS app, ESLint/Prettier/Pint, `.env.example`, Docker Compose (db, mailpit) or Sail, GitHub Actions (lint + tests), README.
 
 Test gate
-- [ ] Pest: `GET /api/v1/health` returns 200 and `{status: ok}`
-- [ ] `pint --test`, `npm run lint`, `npm test` pass locally
+- [x] Pest: `GET /api/v1/health` returns 200 and `{status: ok}`
+- [x] `pint --test`, `npm run lint`, `npm test` pass locally
 - [ ] Web page shows health status from the API (manual)
 - [ ] CI green on a pushed branch
-- [ ] Fresh clone starts using only the README steps
+- [x] Fresh clone starts using only the README steps
 
 ## Phase 1 - Authentication and roles
 Build: `companies`, `users` (user belongs to company), roles customer/staff/admin, Sanctum login/logout, password reset by email, `/api/v1/me`, policies, React login, auth context, protected routes, role-based navigation, demo seeders.
