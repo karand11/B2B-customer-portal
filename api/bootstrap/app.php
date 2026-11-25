@@ -3,6 +3,7 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Spatie\Permission\Middleware\RoleMiddleware;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -12,8 +13,17 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        //
+        // API guests always get 401 JSON; there is no login route to redirect to.
+        $middleware->redirectGuestsTo(fn () => null);
+        $middleware->statefulApi();
+        $middleware->throttleApi();
+        // Also covers GET /sanctum/csrf-cookie (web group) with the same 60/min limiter.
+        $middleware->web(append: ['throttle:api']);
+        $middleware->alias(['role' => RoleMiddleware::class]);
     })
     ->withExceptions(function (Exceptions $exceptions) {
-        //
+        // Guests get 401 JSON, never a redirect to a non-existent login route.
+        $exceptions->shouldRenderJsonWhen(
+            fn ($request) => $request->is('api/*', 'sanctum/*') || $request->expectsJson()
+        );
     })->create();

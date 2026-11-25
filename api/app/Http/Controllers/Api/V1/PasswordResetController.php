@@ -1,0 +1,54 @@
+<?php
+
+namespace App\Http\Controllers\Api\V1;
+
+use App\Http\Controllers\Controller;
+use App\Http\Requests\ForgotPasswordRequest;
+use App\Http\Requests\ResetPasswordRequest;
+use App\Models\User;
+use Illuminate\Auth\Events\PasswordReset;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+
+class PasswordResetController extends Controller
+{
+    public function forgot(ForgotPasswordRequest $request): JsonResponse
+    {
+        $status = Password::sendResetLink(['email' => $request->input('email')]);
+
+        // The known-user path hashes the token; spend the same time otherwise so timing reveals nothing.
+        if ($status !== Password::RESET_LINK_SENT) {
+            Hash::make(Str::random(40));
+        }
+
+        return response()->json(['message' => 'If an account exists for that email, a reset link has been sent.']);
+    }
+
+    public function reset(ResetPasswordRequest $request): JsonResponse
+    {
+        $status = Password::reset(
+            $request->only('email', 'password', 'password_confirmation', 'token'),
+            function (User $user, string $password) {
+                $user->forceFill(['password' => $password, 'remember_token' => Str::random(60)])->save();
+                event(new PasswordReset($user));
+            },
+        );
+
+        // A known user with a pending token costs one hash check inside the broker; spend the same for unknown users.
+        if ($status === Password::INVALID_USER) {
+            Hash::make(Str::random(40));
+        }
+
+        if ($status !== Password::PASSWORD_RESET) {
+            // Same body for bad token, expired token, unknown email.
+            $message = 'This password reset link is invalid or has expired.';
+
+            throw ValidationException::withMessages(['email' => [$message]]);
+        }
+
+        return response()->json(['message' => 'Your password has been reset.']);
+    }
+}

@@ -26,6 +26,20 @@ npm run dev
 ```
 Phase 0 needs no database connection; the services in step 1 are used from Phase 1 on.
 
+## Database, test database and demo users (Phase 1 on)
+```bash
+# test database (only needed if your Docker volume existed before the init script was added)
+docker compose exec db psql -U portal -d portal -c "CREATE DATABASE portal_test;"
+
+cd api
+php artisan migrate:fresh --seed   # creates tables, roles and demo users
+php artisan queue:listen           # needed for password-reset emails (read them in Mailpit)
+```
+Tests run against `portal_test`, never the dev `portal` database.
+
+**Demo users (local development only, never create these in staging or production):**
+`admin@portal.test`, `staff@portal.test`, `alice@northwind.test`, `bob@northwind.test`, `carol@globex.test`, all with password `Demo-Passw0rd!`.
+
 ## Checks (run before finishing any task)
 ```bash
 cd api && ./vendor/bin/pest && ./vendor/bin/pint --test

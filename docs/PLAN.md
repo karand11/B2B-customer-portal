@@ -43,11 +43,11 @@ Test gate
 Build: `companies`, `users` (user belongs to company), roles customer/staff/admin, Sanctum login/logout, password reset by email, `/api/v1/me`, policies, React login, auth context, protected routes, role-based navigation, demo seeders.
 
 Test gate
-- [ ] Pest: valid login works, wrong password 422, logout invalidates session
-- [ ] Pest: login rate-limited (429 after repeated failures)
-- [ ] Pest: unauthenticated `/me` 401; customer on staff-only endpoint 403
-- [ ] Pest: password-reset email sent (Mail fake) and token works once
-- [ ] Vitest: login validation; protected route redirects to /login; customers never see staff menu
+- [x] Pest: valid login works, wrong password 422, logout invalidates session
+- [x] Pest: login rate-limited (429 after repeated failures)
+- [x] Pest: unauthenticated `/me` 401; customer on staff-only endpoint 403
+- [x] Pest: password-reset email sent (Mail fake) and token works once
+- [x] Vitest: login validation; protected route redirects to /login; customers never see staff menu
 - [ ] Manual: customer vs staff navigation differs; refresh keeps session
 
 ## Phase 2 - Product catalog and search
@@ -109,7 +109,7 @@ Test gate
 - [ ] Playwright: staff changes order status, customer sees it
 
 ## Phase 7 - Security, performance and quality pass
-Build: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
+Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
 
 Test gate
 - [ ] Pest: route-audit test (every non-public route has auth; every `/admin` route has a role)
@@ -121,7 +121,7 @@ Test gate
 - [ ] Load check: catalog search p95 under 500 ms at 50 concurrent users
 
 ## Phase 8 - Deployment and go-live
-Build: production environment, Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.
+Build: production environment (never run demo seeders; `RolesSeeder` only), Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.
 
 Test gate
 - [ ] Deploy to staging from CI works; rollback works

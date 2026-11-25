@@ -1,10 +1,13 @@
-import HealthStatus from './HealthStatus';
+import { BrowserRouter } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthContext';
+import AppRoutes from './AppRoutes';
 
 export default function App() {
   return (
-    <main className="mx-auto max-w-xl p-8">
-      <h1 className="mb-4 text-2xl font-semibold">B2B Customer Portal</h1>
-      <HealthStatus />
-    </main>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }
