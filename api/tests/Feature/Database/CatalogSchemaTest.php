@@ -124,17 +124,28 @@ it('honours CATALOG_SEED_COUNT through config and clamps it', function () {
 });
 
 it('clamps the seed count and validates the currency in the config file', function () {
-    putenv('CATALOG_SEED_COUNT=999999');
-    putenv('CATALOG_CURRENCY=eur');
-    $config = require config_path('catalog.php');
-    putenv('CATALOG_SEED_COUNT');
-    putenv('CATALOG_CURRENCY');
+    // env() prefers $_SERVER/$_ENV (filled from .env) over getenv(), so set all three and restore afterwards.
+    $keys = ['CATALOG_SEED_COUNT', 'CATALOG_CURRENCY'];
+    $saved = [$_SERVER, $_ENV, array_map('getenv', array_combine($keys, $keys))];
+    $set = function (string $key, string $value) {
+        $_SERVER[$key] = $_ENV[$key] = $value;
+        putenv("{$key}={$value}");
+    };
 
-    expect($config['seed_count'])->toBe(20000)->and($config['currency'])->toBe('EUR');
+    try {
+        $set('CATALOG_SEED_COUNT', '999999');
+        $set('CATALOG_CURRENCY', 'eur');
+        $config = require config_path('catalog.php');
+        expect($config['seed_count'])->toBe(20000)->and($config['currency'])->toBe('EUR');
 
-    putenv('CATALOG_CURRENCY=euro!');
-    expect((require config_path('catalog.php'))['currency'])->toBe('USD');
-    putenv('CATALOG_CURRENCY');
+        $set('CATALOG_CURRENCY', 'euro!');
+        expect((require config_path('catalog.php'))['currency'])->toBe('USD');
+    } finally {
+        [$_SERVER, $_ENV] = $saved;
+        foreach ($saved[2] as $key => $value) {
+            putenv($value === false ? $key : "{$key}={$value}");
+        }
+    }
 });
 
 it('aborts ProductSeeder outside local/testing and skips it from DatabaseSeeder', function (string $env) {
