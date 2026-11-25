@@ -15,6 +15,9 @@ class Product extends Model
 
     public const SEAL_TYPES = ['open', '2rs', 'zz'];
 
+    /** Price ceiling in cents, also a DB CHECK: keeps price * 9999 * 100 lines inside a bigint and a PHP int. */
+    public const MAX_PRICE_CENTS = 1_000_000_000;
+
     public const STOCK_STATUSES = ['in_stock', 'low_stock', 'out_of_stock', 'on_order'];
 
     /** Columns of the list endpoint (no description). part_number_search is generated, never written. */
@@ -38,6 +41,17 @@ class Product extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
+    }
+
+    /** Why this product cannot be ordered (cart/checkout/reorder rule; precedence as in the contract), or null. */
+    public function unavailableReason(): ?string
+    {
+        return match (true) {
+            ! $this->active => 'inactive',
+            $this->price_on_request => 'price_on_request',
+            $this->stock_status === 'out_of_stock' => 'out_of_stock',
+            default => null,
+        };
     }
 
     /** Every catalog query goes through this scope, for every role. */

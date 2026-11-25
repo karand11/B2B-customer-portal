@@ -213,6 +213,8 @@ it('rejects bad numbers, booleans, columns counts and control characters per row
     expect($code)->toBe(1)->and($out)->toContain($message)->and(Product::count())->toBe(0);
 })->with([
     'negative price' => [['price_cents' => '-1'], 'price_cents: must be a non-negative integer; got "-1"'],
+    'price above the cap' => [['price_cents' => '1000000001'], 'price_cents: must be at most 1000000000'],
+    'price 18 digits' => [['price_cents' => '999999999999999999'], 'price_cents: must be at most 1000000000'],
     'text price' => [['price_cents' => 'abc'], 'price_cents: must be a non-negative integer; got "abc"'],
     'currency price' => [['price_cents' => '$12'], 'price_cents: must be a non-negative integer'],
     'thousands price' => [['price_cents' => '1,250'], 'price_cents: must be a non-negative integer'],
@@ -371,4 +373,12 @@ it('caps a runaway quoted field instead of reading the whole file', function () 
     [$code, $out] = runImport($path);
 
     expect($code)->toBe(1)->and($out)->toContain('line 2: row: line longer than 1000000 bytes');
+});
+
+it('accepts a price of exactly the cap and reports the line of a price above it', function () {
+    [$code] = runImport(importFile([importRow(['part_number' => 'AT-CAP', 'price_cents' => '1000000000'])]));
+    expect($code)->toBe(0)->and(Product::where('part_number', 'AT-CAP')->value('price_cents'))->toBe(Product::MAX_PRICE_CENTS);
+
+    [$code, $out] = runImport(importFile([importRow(['part_number' => 'OK-1']), importRow(['part_number' => 'OVER-1', 'price_cents' => '1000000001'])]));
+    expect($code)->toBe(1)->and($out)->toContain('line 3: price_cents: must be at most 1000000000')->and(Product::where('part_number', 'OVER-1')->exists())->toBeFalse();
 });

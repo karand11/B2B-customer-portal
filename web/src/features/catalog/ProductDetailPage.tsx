@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { ApiError } from '../../lib/api';
 import { useFilters, useProduct } from './api';
+import AddToCart from '../cart/AddToCart';
 import CatalogError from './CatalogError';
 import { SEAL_LABELS, STOCK_LABELS, formatPrice } from './format';
 
@@ -95,6 +96,9 @@ export default function ProductDetailPage() {
           </div>
         ))}
       </dl>
+      <div className="mt-4">
+        <AddToCart product={p} />
+      </div>
     </section>
   );
 }

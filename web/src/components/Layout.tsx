@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { NAV_ITEMS } from '../nav';
+import { useCart } from '../features/cart/api';
+import { NAV_ITEMS, type NavItem } from '../nav';
 import HealthStatus from '../HealthStatus';
 
 function UserBar() {
@@ -32,9 +33,35 @@ function UserBar() {
   );
 }
 
+function NavEntry({ item }: { item: NavItem }) {
+  // Only the customer-only Cart item reads the cart (the query is disabled for other roles).
+  const isCart = item.to === '/cart';
+  const count = useCart().data?.line_count ?? 0;
+  const badge = isCart && count > 0;
+  return (
+    <NavLink
+      to={item.to}
+      end={item.to === '/'}
+      aria-label={
+        badge ? `Cart, ${count} ${count === 1 ? 'item' : 'items'}` : undefined
+      }
+      className={({ isActive }) =>
+        isActive ? 'font-semibold underline' : 'hover:underline'
+      }
+    >
+      {item.label}
+      {badge && (
+        <span className="ml-1 rounded-full bg-blue-700 px-2 text-xs text-white">
+          {count}
+        </span>
+      )}
+    </NavLink>
+  );
+}
+
 export default function Layout() {
   const { user } = useAuth();
-  const wide = useLocation().pathname.startsWith('/catalog');
+  const wide = /^\/(catalog|orders|cart|checkout)/.test(useLocation().pathname);
   const items = user
     ? NAV_ITEMS.filter((i) => i.roles.includes(user.role))
     : [];
@@ -49,15 +76,7 @@ export default function Layout() {
             <ul className="flex gap-4">
               {items.map((i) => (
                 <li key={i.to}>
-                  <NavLink
-                    to={i.to}
-                    end
-                    className={({ isActive }) =>
-                      isActive ? 'font-semibold underline' : 'hover:underline'
-                    }
-                  >
-                    {i.label}
-                  </NavLink>
+                  <NavEntry item={i} />
                 </li>
               ))}
             </ul>

@@ -10,6 +10,10 @@ import AdminPage from './pages/AdminPage';
 import NotFoundPage from './pages/NotFoundPage';
 import CatalogPage from './features/catalog/CatalogPage';
 import ProductDetailPage from './features/catalog/ProductDetailPage';
+import CartPage from './features/cart/CartPage';
+import CheckoutPage from './features/cart/CheckoutPage';
+import OrdersPage from './features/orders/OrdersPage';
+import OrderDetailPage from './features/orders/OrderDetailPage';
 
 export default function AppRoutes() {
   return (
@@ -24,6 +28,12 @@ export default function AppRoutes() {
           <Route path="/" element={<HomePage />} />
           <Route path="/catalog" element={<CatalogPage />} />
           <Route path="/catalog/:id" element={<ProductDetailPage />} />
+          <Route path="/orders" element={<OrdersPage />} />
+          <Route path="/orders/:number" element={<OrderDetailPage />} />
+          <Route element={<RoleRoute roles={['customer']} />}>
+            <Route path="/cart" element={<CartPage />} />
+            <Route path="/checkout" element={<CheckoutPage />} />
+          </Route>
           <Route element={<RoleRoute roles={['staff', 'admin']} />}>
             <Route path="/staff" element={<StaffPage />} />
           </Route>

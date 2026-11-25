@@ -1,4 +1,6 @@
 import { Link } from 'react-router-dom';
+import { useAuth } from '../../auth/AuthContext';
+import AddToCart from '../cart/AddToCart';
 import type { Product } from './api';
 import { SEAL_LABELS, STOCK_LABELS, formatPrice, formatSize } from './format';
 
@@ -28,6 +30,7 @@ export default function ProductTable({
   search: string;
   busy: boolean;
 }) {
+  const canOrder = useAuth().user?.role === 'customer';
   return (
     <div className={busy ? 'opacity-60' : undefined} aria-busy={busy}>
       <table className="w-full border-collapse">
@@ -55,6 +58,11 @@ export default function ProductTable({
             <th scope="col" className={th}>
               Price
             </th>
+            {canOrder && (
+              <th scope="col" className={th}>
+                Order
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -90,6 +98,11 @@ export default function ProductTable({
               <td data-label="Price" className={td}>
                 {formatPrice(p, currency)}
               </td>
+              {canOrder && (
+                <td data-label="Order" className={td}>
+                  <AddToCart product={p} />
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

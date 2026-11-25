@@ -9,6 +9,7 @@ import { vi } from 'vitest';
 import { AuthProvider } from '../auth/AuthContext';
 import AppRoutes from '../AppRoutes';
 import type { Me } from '../auth/types';
+import { emptyCart } from '../features/cart/api';
 
 export const customer: Me = {
   id: 3,
@@ -51,6 +52,8 @@ export const CSRF = 'GET /sanctum/csrf-cookie';
 export function mockApi(routes: Record<string, Handler>) {
   const all: Record<string, Handler> = {
     'GET /api/v1/health': { body: { status: 'ok' } },
+    // Layout reads the cart for every customer page; tests override it when they care.
+    'GET /api/v1/cart': { body: { data: emptyCart('USD') } },
     [CSRF]: () => {
       document.cookie = 'XSRF-TOKEN=tok%3D123; path=/';
       return { status: 204 };

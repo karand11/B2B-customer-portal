@@ -62,12 +62,20 @@ function Facet({
 }
 
 /** Text box with local state; commits to the URL (replace) after a pause. */
-function SearchBox({
+export function SearchBox({
   value,
   onCommit,
+  id = 'catalog-q',
+  label = 'Part number',
+  hint = 'e.g. 6205 or 6205-2RS',
+  maxLength = 64,
 }: {
   value: string;
   onCommit: (q: string) => void;
+  id?: string;
+  label?: string;
+  hint?: string;
+  maxLength?: number;
 }) {
   const [text, setText] = useState(value);
   const committed = useRef(value);
@@ -85,23 +93,23 @@ function SearchBox({
   }, [value, cancel]);
   return (
     <div className="mb-4">
-      <label htmlFor="catalog-q" className="mb-1 block text-sm font-semibold">
-        Part number
+      <label htmlFor={id} className="mb-1 block text-sm font-semibold">
+        {label}
       </label>
       <input
-        id="catalog-q"
+        id={id}
         type="search"
         value={text}
-        maxLength={64}
-        aria-describedby="catalog-q-hint"
+        maxLength={maxLength}
+        aria-describedby={`${id}-hint`}
         className={inputCls}
         onChange={(e) => {
           setText(e.target.value);
           schedule(e.target.value.trim());
         }}
       />
-      <p id="catalog-q-hint" className="mt-1 text-xs text-slate-700">
-        e.g. 6205 or 6205-2RS
+      <p id={`${id}-hint`} className="mt-1 text-xs text-slate-700">
+        {hint}
       </p>
     </div>
   );

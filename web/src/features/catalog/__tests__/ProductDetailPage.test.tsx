@@ -23,7 +23,7 @@ describe('product detail page', () => {
     expect(dl).toHaveTextContent('Price$1,250.50');
     expect(dl).toHaveTextContent('Single row, rubber sealed.');
     expect(document.title).toBe('6205-2RS');
-    expect(screen.queryByRole('button', { name: /cart|quote/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /quote/i })).toBeNull();
   });
 
   it('shows a loading skeleton first', async () => {

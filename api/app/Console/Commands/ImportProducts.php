@@ -314,6 +314,8 @@ class ImportProducts extends Command
         $cents = $get('price_cents');
         if ($cents !== '' && preg_match('/^\d{1,18}$/D', $cents) !== 1) {
             $fail('price_cents', "must be a non-negative integer; got \"{$this->show($cents)}\"");
+        } elseif ($cents !== '' && (int) $cents > Product::MAX_PRICE_CENTS) {
+            $fail('price_cents', 'must be at most '.Product::MAX_PRICE_CENTS." (cents); got \"{$cents}\"");
         } elseif ($onRequest !== null && $onRequest && $cents !== '') {
             $fail('price_cents', 'must be empty when price_on_request is true');
         } elseif ($onRequest === false && $cents === '') {

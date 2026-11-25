@@ -9,7 +9,7 @@ export default function HomePage() {
       <h1 className="mb-2 text-2xl font-semibold">
         {user.role === 'customer' ? 'Customer home' : 'Staff home'}
       </h1>
-      <p>Welcome, {user.name}. Quotes and orders arrive in later phases.</p>
+      <p>Welcome, {user.name}. Quotes arrive in a later phase.</p>
       <p className="mt-2">
         <Link to="/catalog" className="text-blue-800 underline">
           Browse the product catalog

@@ -48,6 +48,18 @@ class User extends Authenticatable
         return $this->belongsTo(Company::class);
     }
 
+    // hasRole() uses loadMissing('roles'), which is an explicit load (no lazy-loading violation).
+    public function isCustomer(): bool
+    {
+        return $this->hasRole('customer');
+    }
+
+    /** staff or admin */
+    public function isStaff(): bool
+    {
+        return $this->hasAnyRole(['staff', 'admin']);
+    }
+
     public function sendPasswordResetNotification($token): void
     {
         $this->notify(new ResetPasswordNotification($token));

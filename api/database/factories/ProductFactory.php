@@ -40,6 +40,11 @@ class ProductFactory extends Factory
         return $this->state(['active' => false]);
     }
 
+    public function atPriceCap(): static
+    {
+        return $this->state(['price_cents' => Product::MAX_PRICE_CENTS]);
+    }
+
     public function priceOnRequest(): static
     {
         return $this->state(['price_cents' => null, 'price_on_request' => true]);

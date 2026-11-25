@@ -86,28 +86,34 @@ describe('role-based navigation', () => {
       .getAllByRole('link')
       .map((a) => a.textContent);
 
-  it('customer sees Home and Catalog only', async () => {
+  it('customer sees Home, Catalog, Orders and Cart', async () => {
     mockApi({ [ME]: meOk(customer) });
     renderApp('/');
     await screen.findByRole('navigation', { name: /main/i });
-    expect(links()).toEqual(['Home', 'Catalog']);
+    expect(links()).toEqual(['Home', 'Catalog', 'Orders', 'Cart']);
     expect(screen.queryByText('Staff area')).toBeNull();
     expect(screen.queryByText('Admin area')).toBeNull();
   });
 
-  it('staff sees Home, Catalog and Staff area, no Admin area', async () => {
+  it('staff sees Orders and Staff area, no Cart and no Admin area', async () => {
     mockApi({ [ME]: meOk(staff) });
     renderApp('/');
     await screen.findByRole('navigation', { name: /main/i });
-    expect(links()).toEqual(['Home', 'Catalog', 'Staff area']);
+    expect(links()).toEqual(['Home', 'Catalog', 'Orders', 'Staff area']);
     expect(screen.queryByText('Admin area')).toBeNull();
   });
 
-  it('admin sees all four', async () => {
+  it('admin sees all but Cart', async () => {
     mockApi({ [ME]: meOk(admin) });
     renderApp('/');
     await screen.findByRole('navigation', { name: /main/i });
-    expect(links()).toEqual(['Home', 'Catalog', 'Staff area', 'Admin area']);
+    expect(links()).toEqual([
+      'Home',
+      'Catalog',
+      'Orders',
+      'Staff area',
+      'Admin area',
+    ]);
   });
 });
 

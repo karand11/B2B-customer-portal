@@ -66,12 +66,12 @@ Test gate
 Build: `orders`, `order_items` (snapshot price/part number/name), statuses pending/confirmed/shipped/delivered/cancelled, cart, `POST /orders`, `GET /orders` (own company), order detail with status timeline, re-order, history filters by status and date.
 
 Test gate
-- [ ] Pest: customer A cannot read, list or cancel customer B's order
-- [ ] Pest: later price changes do not alter old orders
-- [ ] Pest: totals calculated server-side; tampered client total ignored
-- [ ] Pest: invalid quantity or unknown product returns 422
-- [ ] Pest: only allowed status transitions work
-- [ ] Vitest: cart add/remove/update, persists on reload; history filters work
+- [x] Pest: customer A cannot read, list or cancel customer B's order
+- [x] Pest: later price changes do not alter old orders
+- [x] Pest: totals calculated server-side; tampered client total ignored
+- [x] Pest: invalid quantity or unknown product returns 422
+- [x] Pest: only allowed status transitions work
+- [x] Vitest: cart add/remove/update, persists on reload; history filters work
 
 ## Phase 4 - Quote requests (RFQ)
 Build: `quote_requests`, `quote_items` (free-text lines allowed), statuses submitted/in_review/quoted/accepted/declined/expired, staff pricing and validity date, queued emails both ways, accept converts to order, attachment upload (max 10 MB).
@@ -109,7 +109,7 @@ Test gate
 - [ ] Playwright: staff changes order status, customer sees it
 
 ## Phase 7 - Security, performance and quality pass
-Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. From the Phase 2 review: re-measure catalog search on a production-like server, lower the max `page` or cap deep OFFSET, consider a dedicated search limiter (e.g. 30/min) and stampede protection (`Cache::flexible`/lock) on the filters cache, escape leading `= + - @` in any CSV/XLSX export. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
+Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. From the Phase 2 review: re-measure catalog search on a production-like server, lower the max `page` or cap deep OFFSET, consider a dedicated search limiter (e.g. 30/min) and stampede protection (`Cache::flexible`/lock) on the filters cache, escape leading `= + - @` in any CSV/XLSX export. From the Phase 3 review: send an expected subtotal with checkout (or confirm price changes) so a price change between viewing and placing is never silent, dedicated limiters for reorder and order search, trigram index on `orders.po_reference` if volume grows, require `APP_DEBUG=false` and `SESSION_SECURE_COOKIE=true` in every deployed environment. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
 
 Test gate
 - [ ] Pest: route-audit test (every non-public route has auth; every `/admin` route has a role)

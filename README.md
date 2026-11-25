@@ -53,6 +53,14 @@ php artisan products:import path/to/products.csv             # upsert by part nu
 ```
 Import exit codes: `0` ok, `1` some rows were bad (the rest are imported; bad rows are listed with line numbers), `2` fatal error (missing file or header). Prices are `USD` unless `CATALOG_CURRENCY` is set.
 
+## Cart and orders (Phase 3 on)
+`migrate:fresh --seed` also creates 8 demo orders (local and testing only): Northwind (Alice, Bob) `ORD-NWAAA-AAAA2` to `AAAA6`, Globex (Carol) `ORD-GXAAA-AAAA2` to `AAAA4`. Seeded PO references: `NW-PO-1001`, `NW-PO-1002`, `GX-PO-2001`.
+
+- Customers see only their own company's orders. Staff and admin see all orders but cannot use the cart.
+- Statuses: `pending` -> `confirmed` -> `shipped` -> `delivered`; `cancelled` from pending (customer or staff) or confirmed (staff only).
+- Limits: 10 orders per minute per user, at most 100 cart lines, quantity 1 to 9999. Tax and shipping are 0 for now.
+- There is no staff status screen until Phase 6. To move an order along as staff, log in via the API with a cookie jar (see `docs/api-contract.md`, `PATCH /api/v1/orders/{number}/status` with `{"status": "confirmed"}`).
+
 ## Checks (run before finishing any task)
 ```bash
 cd api && ./vendor/bin/pest && ./vendor/bin/pint --test

@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   LIST,
+  ME,
   P1,
   P2,
   P3,
@@ -14,7 +15,7 @@ import {
   loc,
   setup,
 } from './fixtures';
-import type { Spec } from '../../../test/utils';
+import { admin, meOk, staff, type Spec } from '../../../test/utils';
 
 afterEach(() => vi.useRealTimers());
 
@@ -389,10 +390,11 @@ describe('price and labels', () => {
     const t = within(table);
     expect(t.getByText('$1,250.50')).toBeInTheDocument();
     expect(t.getByText('$9.90')).toBeInTheDocument();
-    expect(t.getAllByText('Price on request')).toHaveLength(1);
+    // Customers also get the reason in the Order column (two cells, not one).
+    expect(t.getAllByText('Price on request')).toHaveLength(2);
     expect(table).not.toHaveTextContent('$0.00');
     for (const label of ['In stock', 'On order', 'Low stock', 'Out of stock'])
-      expect(t.getByText(label)).toBeInTheDocument();
+      expect(t.getAllByText(label).length).toBeGreaterThan(0);
     expect(t.getAllByText('2RS (rubber sealed)')).toHaveLength(2);
     expect(t.getByText('ZZ (metal shielded)')).toBeInTheDocument();
     expect(t.getByText('Open')).toBeInTheDocument();
@@ -479,11 +481,25 @@ describe('accessibility', () => {
     expect(document.getElementById('catalog-filters')).not.toBeNull();
   });
 
-  it('has no cart or quote buttons yet', async () => {
+  it('customers get add-to-cart controls but no quote buttons', async () => {
     setup('/catalog');
     await rows();
+    expect(
+      screen.getAllByRole('button', { name: 'Add to cart' }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /quote/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /quote/i })).toBeNull();
+  });
+
+  it.each([
+    ['staff', staff],
+    ['admin', admin],
+  ])('%s sees no cart controls and no Order column', async (_n, user) => {
+    setup('/catalog', { [ME]: meOk(user) });
+    await rows();
     expect(screen.queryByRole('button', { name: /cart|quote/i })).toBeNull();
-    expect(screen.queryByRole('link', { name: /cart|quote/i })).toBeNull();
+    expect(screen.queryByRole('columnheader', { name: 'Order' })).toBeNull();
+    expect(screen.queryByLabelText(/^Quantity for/)).toBeNull();
   });
 });
 

@@ -57,7 +57,7 @@ export async function csrfCookie(): Promise<void> {
 }
 
 interface Options {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   body?: unknown;
   /** Bootstrap calls (GET /me) treat 401 as "guest", not as a session loss. */
   skipUnauthorized?: boolean;
@@ -102,6 +102,9 @@ export const api = {
     request<T>(path, opts),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PATCH', body }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
 /** Safe user-facing text for any error thrown by the wrapper. */

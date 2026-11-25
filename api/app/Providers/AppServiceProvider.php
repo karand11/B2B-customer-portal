@@ -28,6 +28,8 @@ class AppServiceProvider extends ServiceProvider
 
         // IPv6 clients are keyed on their /64 so rotating addresses inside one prefix does not dodge limits.
         RateLimiter::for('api', fn (Request $request) => $this->limit(60, $request->user()?->id ?: ClientIp::key($request->ip())));
+        // Every POST /orders attempt counts, including 422s (the route sits behind auth, so the user id key always exists).
+        RateLimiter::for('orders-create', fn (Request $request) => $this->limit(10, 'orders-create:'.($request->user()?->id ?: ClientIp::key($request->ip()))));
         RateLimiter::for('login-ip', fn (Request $request) => $this->limit(20, ClientIp::key($request->ip())));
         RateLimiter::for('password-reset', fn (Request $request) => $this->limit(5, ClientIp::key($request->ip())));
     }
