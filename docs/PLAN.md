@@ -36,7 +36,7 @@ Test gate
 - [x] Pest: `GET /api/v1/health` returns 200 and `{status: ok}`
 - [x] `pint --test`, `npm run lint`, `npm test` pass locally
 - [ ] Web page shows health status from the API (manual)
-- [ ] CI green on a pushed branch
+- [x] CI green on a pushed branch
 - [x] Fresh clone starts using only the README steps
 
 ## Phase 1 - Authentication and roles
