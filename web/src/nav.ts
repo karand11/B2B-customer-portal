@@ -9,6 +9,7 @@ export interface NavItem {
 // Single source for navigation; filtered by role. Hiding is UX only.
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Home', to: '/', roles: ['customer', 'staff', 'admin'] },
+  { label: 'Catalog', to: '/catalog', roles: ['customer', 'staff', 'admin'] },
   { label: 'Staff area', to: '/staff', roles: ['staff', 'admin'] },
   { label: 'Admin area', to: '/admin', roles: ['admin'] },
 ];

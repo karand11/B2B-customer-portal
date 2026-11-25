@@ -4,6 +4,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Spatie\Permission\Middleware\RoleMiddleware;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -26,4 +27,9 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn ($request) => $request->is('api/*', 'sanctum/*') || $request->expectsJson()
         );
+
+        // One generic 404 body for api/*: ModelNotFoundException (wrapped by Laravel) must not leak the model class name.
+        $exceptions->render(fn (NotFoundHttpException $e, $request) => $request->is('api/*')
+            ? response()->json(['message' => 'Not found.'], 404)
+            : null);
     })->create();

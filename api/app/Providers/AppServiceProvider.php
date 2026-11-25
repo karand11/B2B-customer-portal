@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Support\ClientIp;
 use Illuminate\Auth\Notifications\ResetPassword;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
@@ -18,6 +19,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Any N+1 throws in tests and dev instead of silently degrading.
+        Model::preventLazyLoading(! $this->app->isProduction());
+
         // Reset links point at the SPA, never at the API host.
         ResetPassword::createUrlUsing(fn ($user, string $token) => config('app.web_url')
             .'/reset-password?token='.$token.'&email='.urlencode($user->getEmailForPasswordReset()));

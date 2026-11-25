@@ -40,6 +40,19 @@ Tests run against `portal_test`, never the dev `portal` database.
 **Demo users (local development only, never create these in staging or production):**
 `admin@portal.test`, `staff@portal.test`, `alice@northwind.test`, `bob@northwind.test`, `carol@globex.test`, all with password `Demo-Passw0rd!`.
 
+## Product catalog (Phase 2 on)
+`migrate:fresh --seed` creates 7 categories and about 250 demo bearings (local and testing only).
+```bash
+cd api
+# bigger demo catalog for performance checks (5,000 products)
+CATALOG_SEED_COUNT=5000 php artisan db:seed --class=ProductSeeder   # PowerShell: $env:CATALOG_SEED_COUNT=5000; php artisan db:seed --class=ProductSeeder
+
+# import products from a CSV (column spec: docs/phase-2-design.md section 6)
+php artisan products:import path/to/products.csv --dry-run   # validate only, writes nothing
+php artisan products:import path/to/products.csv             # upsert by part number
+```
+Import exit codes: `0` ok, `1` some rows were bad (the rest are imported; bad rows are listed with line numbers), `2` fatal error (missing file or header). Prices are `USD` unless `CATALOG_CURRENCY` is set.
+
 ## Checks (run before finishing any task)
 ```bash
 cd api && ./vendor/bin/pest && ./vendor/bin/pint --test

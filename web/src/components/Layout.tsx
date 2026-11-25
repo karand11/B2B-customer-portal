@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, NavLink, Outlet } from 'react-router-dom';
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { NAV_ITEMS } from '../nav';
 import HealthStatus from '../HealthStatus';
@@ -34,6 +34,7 @@ function UserBar() {
 
 export default function Layout() {
   const { user } = useAuth();
+  const wide = useLocation().pathname.startsWith('/catalog');
   const items = user
     ? NAV_ITEMS.filter((i) => i.roles.includes(user.role))
     : [];
@@ -64,7 +65,9 @@ export default function Layout() {
         )}
         <UserBar />
       </header>
-      <main className="mx-auto w-full max-w-xl flex-1 p-8">
+      <main
+        className={`mx-auto w-full flex-1 p-8 ${wide ? 'max-w-7xl' : 'max-w-xl'}`}
+      >
         <Outlet />
       </main>
       <footer className="border-t border-slate-300 px-6 py-3 text-sm">

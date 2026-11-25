@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 
 export default function HomePage() {
@@ -8,8 +9,11 @@ export default function HomePage() {
       <h1 className="mb-2 text-2xl font-semibold">
         {user.role === 'customer' ? 'Customer home' : 'Staff home'}
       </h1>
-      <p>
-        Welcome, {user.name}. Catalog, quotes and orders arrive in later phases.
+      <p>Welcome, {user.name}. Quotes and orders arrive in later phases.</p>
+      <p className="mt-2">
+        <Link to="/catalog" className="text-blue-800 underline">
+          Browse the product catalog
+        </Link>
       </p>
     </section>
   );

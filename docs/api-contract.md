@@ -38,9 +38,9 @@ Schema, config, seeders and test plan: `docs/phase-1-design.md`. This section is
   ```json
   { "message": "User does not have the right roles." }
   ```
-  404 (unknown route or resource): the message text is non-contractual (Laravel's default); only the status code is contractual.
+  404 (every `api/*` 404: unknown route, unknown or inactive resource id, malformed id): the body is contractual and is exactly the JSON below, with debug on or off. Internal model names (for example `No query results for model [App\Models\Product]`) must never appear.
   ```json
-  { "message": "Not Found." }
+  { "message": "Not found." }
   ```
   419 (missing or bad CSRF token):
   ```json
@@ -239,3 +239,148 @@ Trade-off (accepted by the user): 20 failures from anywhere can lock a victim's 
 - `next` is honoured only if it starts with a single `/` (not `//`, not a scheme).
 - Routes: `/login`, `/forgot-password`, `/reset-password` (reads `token`, `email` from the query string) are guest-only (logged-in users go to `/`). `/` requires login. `/staff` requires staff or admin. `/admin` requires admin. Wrong role -> a 403 "Not allowed" page (not a redirect loop).
 - Navigation (single config, filtered by role): Home (all), Staff area `/staff` (staff, admin), Admin area `/admin` (admin). Header shows user name, role, and company name when present.
+
+---
+
+## Phase 2 - Product catalog and search
+
+Schema, indexes, seeders, CSV import, frontend design and test plan: `docs/phase-2-design.md`. This section is the HTTP contract. All Phase 1 conventions (cookie auth, `Accept: application/json`, error shapes, `{ "data": ... }` wrapping, 429 body and `Retry-After`) apply unchanged.
+
+### Phase 2 rules (apply to all four endpoints)
+
+- Auth: `auth:sanctum`, any role (`customer`, `staff`, `admin`). Guests get 401. Decision: the catalog is for logged-in users only; there is no public catalog.
+- Company scoping: NONE, on purpose. The catalog is one shared list for every company (no per-company prices or visibility in v1), so no query filters by `company_id` and no endpoint reads or accepts `company_id`. A `company_id` query parameter is ignored like any other unknown parameter. Response bodies contain no company, user or cost data, so there is nothing company-specific to leak. A customer of company A and a customer of company B get byte-identical responses for the same request.
+- Visibility: every endpoint returns only products with `active = true`, for ALL roles including staff and admin. An inactive product is indistinguishable from an unknown one (list omits it, detail returns 404). Staff see inactive products only through the Phase 6 `/admin` endpoints.
+- Read-only: only `GET` routes exist. `POST/PUT/PATCH/DELETE` on these paths return 405 (JSON). No endpoint accepts a price, stock or `active` value from the client. Product data enters only via seeders and the `products:import` command.
+- Unknown query parameters are ignored (not 422).
+- Rate limit: the existing Laravel `api` limiter, 60 requests per 60 s per user id (see Phase 1 Rate limits table); one shared bucket across all four endpoints. 429 uses the standard body and `Retry-After`. No new limiter in Phase 2.
+- Numbers: `*_mm` are JSON numbers (max 2 decimals), `price_cents` is an integer or `null`, never a string. Money is integer minor units; the currency is not on the product (see `/products/filters`).
+
+### ProductResource (list items)
+
+```json
+{
+  "id": 17,
+  "part_number": "6205-2RS",
+  "name": "Deep groove ball bearing 6205-2RS 25x52x15",
+  "brand": "SKF",
+  "category": { "id": 1, "slug": "deep-groove-ball", "name": "Deep groove ball bearings" },
+  "inner_diameter_mm": 25,
+  "outer_diameter_mm": 52,
+  "width_mm": 15,
+  "material": "Chrome steel",
+  "seal_type": "2rs",
+  "price_cents": 1250,
+  "price_on_request": false,
+  "stock_status": "in_stock"
+}
+```
+
+Rules: exactly these keys (no `active`, `description`, `part_number_search`, `category_id`, timestamps). `price_on_request = true` implies `price_cents = null`; `price_on_request = false` implies `price_cents` is an integer >= 0. `seal_type` is one of `open|2rs|zz`. `stock_status` is one of `in_stock|low_stock|out_of_stock|on_order`. `ProductDetailResource` (detail endpoint) is the same plus `"description": string|null`.
+
+### GET /api/v1/products
+- Auth: `auth:sanctum`, any role. Scope: none (shared catalog, see Phase 2 rules).
+- Request: query string only.
+
+| Param | Type and rule | Meaning |
+| --- | --- | --- |
+| `q` | string, trimmed, max 64. Empty or absent means no search. | Part-number search, see below |
+| `category` | CSV of slugs, max 10, each `^[a-z0-9-]{1,64}$`, each must exist in `categories` (unknown slug is 422) | Bearing type; OR within the list |
+| `brand` | CSV, max 20 values, each 1-64 chars matching `^[\p{L}\p{N} .&/+-]+$`, exact case-sensitive match against stored value (unknown brand is NOT 422, it just matches nothing) | OR within the list |
+| `material` | same rules as `brand` | OR within the list |
+| `seal_type` | CSV, each in `open,2rs,zz` | OR within the list |
+| `stock_status` | CSV, each in `in_stock,low_stock,out_of_stock,on_order` | OR within the list |
+| `inner_diameter_min`, `inner_diameter_max` | decimal matching `^\d{1,4}(\.\d{1,2})?$`, value 0.01 to 5000, mm | Inclusive range on `inner_diameter_mm`; either bound may be sent alone |
+| `outer_diameter_min`, `outer_diameter_max` | same | Inclusive range on `outer_diameter_mm` |
+| `width_min`, `width_max` | same | Inclusive range on `width_mm` |
+| `sort` | one of the whitelist below, default described below | Ordering |
+| `page` | integer 1 to 1000000, default 1 | |
+| `per_page` | integer 1 to 100, default 24 | Values above 100 are 422, not clamped |
+
+- CSV params: comma separated, no spaces around commas needed (surrounding spaces are trimmed), empty items are 422. Different params combine with AND; values inside one CSV param combine with OR. Array syntax (`brand[]=x`, `q[]=x`) is 422 for every param above.
+- Min greater than max for a range is 422 on the `*_min` key.
+- Search `q`: the server normalises both sides by lowercasing and removing every character that is not `a-z` or `0-9`. `6205-2RS`, `6205 2rs`, `6205-2rs` and `62052RS` are the same query and match the stored `6205-2RS`. Match is a substring match on the normalised part number (so `6205` matches `6205`, `6205-2RS`, `6205-2RS/C3` and `16205`; `2rs` matches suffixes). Wildcards have no meaning: `%`, `_`, `\`, quotes and any other symbol are removed by normalisation, they never act as LIKE wildcards. If `q` is not empty but normalises to the empty string (for example `%` or `---`), the result is an empty list (200, `total: 0`), not the whole catalog. Only the part number is searched (not name, brand or description).
+- Sort whitelist (`-` prefix means descending): `part_number`, `brand`, `inner_diameter`, `outer_diameter`, `width`, `price`, and the `-` variants of each (12 values). `price` sorts products with `price_on_request = true` last in both directions. Every ordering ends with `id` ascending as tie-break, so pages are stable and never overlap. `part_number` orders by the normalised part number.
+- Default order: without `q`, `part_number`. With `q` and no `sort`: relevance (exact normalised match first, then prefix matches, then other substring matches, then `part_number`, then `id`). An explicit `sort` always wins over relevance.
+- Response 200:
+  ```json
+  {
+    "data": [ { "...ProductResource": "..." } ],
+    "meta": { "current_page": 1, "last_page": 9, "per_page": 24, "total": 212, "from": 1, "to": 24 }
+  }
+  ```
+  `meta` has exactly these six keys; there is no `links` key. A page beyond `last_page` returns 200 with `data: []`, `from: null`, `to: null`. No matches: `data: []`, `total: 0`, `last_page: 1`, `current_page` as requested.
+- Errors:
+  - 401 guest.
+  - 422 standard shape; the `errors` key is always the query parameter name (for example `sort`, `brand`, `outer_diameter_min`, `per_page`), never `brand.0`. Triggers: unknown `sort`, enum value not allowed, unknown category slug, malformed or out-of-range number, min greater than max, `per_page` outside 1..100, `page` below 1, `q` longer than 64, array syntax, a value with an embedded NUL byte (for example `brand=S%00KF`) or invalid UTF-8 (`%FF`). A lone leading or trailing `%00` (for example `brand=%00`) is trimmed by Laravel's `TrimStrings` and treated as empty: 200, same as the parameter absent.
+  - 429 rate limited.
+  - 403: not applicable (any role is allowed). 404: not applicable (unknown filter values are 422 or empty, never 404).
+- Query count: constant, independent of `per_page` and of the number of rows returned (no N+1). Category is eager loaded.
+
+### GET /api/v1/products/{id}
+- Auth: `auth:sanctum`, any role. Scope: none (shared catalog).
+- Path: `id` must match `[0-9]{1,18}` (route constraint); anything else (including `filters` handled by its own route, `abc`, `-1`, a 25-digit number) is a 404, never a 500. Body is exactly `{"message":"Not found."}`.
+- Response 200: `{ "data": <ProductDetailResource> }`.
+- Errors: 401 guest. 404 unknown id OR `active = false`, for every role, body exactly `{"message":"Not found."}` (same as any `api/*` 404, no model name). 429. 403 and 422: not applicable.
+
+### GET /api/v1/products/filters
+- Auth: `auth:sanctum`, any role. Scope: none. Registered before `/products/{id}`.
+- Request: no parameters (unknown ones ignored).
+- Response 200:
+  ```json
+  {
+    "data": {
+      "currency": "USD",
+      "brands": ["FAG", "NSK", "NTN", "SKF", "Timken"],
+      "materials": ["Ceramic", "Chrome steel", "Stainless steel"],
+      "seal_types": ["open", "2rs", "zz"],
+      "stock_statuses": ["in_stock", "low_stock", "out_of_stock", "on_order"],
+      "ranges": {
+        "inner_diameter_mm": { "min": 3, "max": 120 },
+        "outer_diameter_mm": { "min": 10, "max": 215 },
+        "width_mm": { "min": 3, "max": 60 }
+      }
+    }
+  }
+  ```
+  - `currency`: the single configured ISO 4217 code (`config('catalog.currency')`, env `CATALOG_CURRENCY`, default `USD`). It applies to every `price_cents` in the catalog. It is read at request time and is not part of the cached payload. This is the only place the SPA gets the currency; there is no `/config` endpoint in Phase 2.
+  - `brands`, `materials`: distinct values among active products, ascending. `seal_types`, `stock_statuses`: distinct values present among active products, in the canonical order shown. `ranges`: min and max among active products; when there are no active products every `min`/`max` is `null` and the lists are empty.
+  - Options are global, not narrowed by other selected filters (no faceted counts).
+  - Everything except `currency` is cached (Laravel cache, key `catalog:filters`, TTL 600 s) and flushed by `products:import` and by the seeders. The payload is identical for all users.
+- Errors: 401 guest. 429. 403, 404, 422: not applicable.
+
+### GET /api/v1/categories
+- Auth: `auth:sanctum`, any role. Scope: none.
+- Request: no parameters.
+- Response 200:
+  ```json
+  {
+    "data": [
+      { "id": 1, "slug": "deep-groove-ball", "name": "Deep groove ball bearings", "product_count": 120 }
+    ]
+  }
+  ```
+  Ordered by `sort_order`, then `name`. `product_count` counts active products only; categories with 0 active products are still listed (count 0). Not paginated (a handful of rows). Cached like filters (key `catalog:categories`, TTL 600 s). The category `slug` is the value used by the `category` filter.
+- Errors: 401 guest. 429. 403, 404, 422: not applicable.
+
+### Phase 2 endpoint summary
+
+| Method | Path | Guest | Customer | Staff | Admin |
+| --- | --- | --- | --- | --- | --- |
+| GET | /api/v1/products | 401 | 200/422 | 200/422 | 200/422 |
+| GET | /api/v1/products/{id} | 401 | 200/404 | 200/404 | 200/404 |
+| GET | /api/v1/products/filters | 401 | 200 | 200 | 200 |
+| GET | /api/v1/categories | 401 | 200 | 200 | 200 |
+| POST/PUT/PATCH/DELETE | /api/v1/products, /api/v1/products/{id} | 401 or 405 | 405 | 405 | 405 |
+
+(All also return 429 when the user exceeds 60 requests per minute. For a guest on a non-GET method, 401 vs 405 is not contractual.)
+
+### CSV import (Artisan, not HTTP)
+
+`php artisan products:import {file} {--dry-run}`. Column spec, validation, exit codes and output format are in `docs/phase-2-design.md` section 6. There is no upload endpoint in Phase 2.
+
+### Frontend behaviour bound to this contract
+- Routes: `/catalog` and `/catalog/:id`, any logged-in role (no role branching; staff and customers see the same catalog). Nav item "Catalog" for all roles.
+- URL query string uses exactly the API parameter names above (`q`, `category`, `brand`, `material`, `seal_type`, `stock_status`, `inner_diameter_min`, ..., `sort`, `page`). `per_page` is not in the URL (fixed 24). Defaults are omitted from the URL. Invalid URL values are dropped client-side before calling the API.
+- Money: `price_cents / 100` formatted with `Intl.NumberFormat('en-US', { style: 'currency', currency })`, where `currency` comes from `/products/filters`. `price_on_request = true` shows the text "Price on request".
+- 404 on detail shows a "Product not found" page, not an error banner. 429 shows the Phase 1 style "try again in N seconds" message from `Retry-After`.

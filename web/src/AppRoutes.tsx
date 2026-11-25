@@ -8,6 +8,8 @@ import HomePage from './pages/HomePage';
 import StaffPage from './pages/StaffPage';
 import AdminPage from './pages/AdminPage';
 import NotFoundPage from './pages/NotFoundPage';
+import CatalogPage from './features/catalog/CatalogPage';
+import ProductDetailPage from './features/catalog/ProductDetailPage';
 
 export default function AppRoutes() {
   return (
@@ -20,6 +22,8 @@ export default function AppRoutes() {
         </Route>
         <Route element={<ProtectedRoute />}>
           <Route path="/" element={<HomePage />} />
+          <Route path="/catalog" element={<CatalogPage />} />
+          <Route path="/catalog/:id" element={<ProductDetailPage />} />
           <Route element={<RoleRoute roles={['staff', 'admin']} />}>
             <Route path="/staff" element={<StaffPage />} />
           </Route>

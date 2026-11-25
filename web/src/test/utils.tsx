@@ -1,6 +1,10 @@
 import { render } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import {
+  RouterProvider,
+  createMemoryRouter,
+  useLocation,
+} from 'react-router-dom';
 import { vi } from 'vitest';
 import { AuthProvider } from '../auth/AuthContext';
 import AppRoutes from '../AppRoutes';
@@ -64,7 +68,8 @@ export function mockApi(routes: Record<string, Handler>) {
       body: init?.body ? JSON.parse(String(init.body)) : null,
     };
     calls.push(req);
-    const h = all[`${method} ${url}`];
+    // Exact "METHOD /path?query" first, then "METHOD /path" for any query string.
+    const h = all[`${method} ${url}`] ?? all[`${method} ${url.split('?')[0]}`];
     if (!h) throw new Error(`Unmocked request: ${method} ${url}`);
     const spec = typeof h === 'function' ? await h(req) : h;
     const status = spec.status ?? 200;
@@ -98,15 +103,27 @@ export function renderApp(path = '/') {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  // Data router so tests can drive history: router.navigate(-1).
+  const router = createMemoryRouter(
+    [
+      {
+        path: '*',
+        element: (
+          <>
+            <AuthProvider>
+              <AppRoutes />
+            </AuthProvider>
+            <Probe />
+          </>
+        ),
+      },
+    ],
+    { initialEntries: [path] },
+  );
   render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={[path]}>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-        <Probe />
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { client };
+  return { client, router };
 }

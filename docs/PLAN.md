@@ -54,12 +54,12 @@ Test gate
 Build: `categories`, `products` (+ attributes). Bearing fields: part number, brand, type, inner diameter, outer diameter, width, material, seal type, price or price on request, stock status. `GET /api/v1/products` with search, filters, sort, pagination; product detail; CSV import command; 200+ seeded products; indexes; React catalog with filter sidebar synced to URL; detail page.
 
 Test gate
-- [ ] Pest: search by exact and partial part number (e.g. `6205`)
-- [ ] Pest: each filter alone and combined (type + diameter range + brand)
-- [ ] Pest: pagination correct; invalid sort/filter returns 422
-- [ ] Pest: constant query count (no N+1)
-- [ ] Pest: CSV import idempotent and reports bad rows
-- [ ] Vitest: filters update URL and restore from URL; empty and error states
+- [x] Pest: search by exact and partial part number (e.g. `6205`)
+- [x] Pest: each filter alone and combined (type + diameter range + brand)
+- [x] Pest: pagination correct; invalid sort/filter returns 422
+- [x] Pest: constant query count (no N+1)
+- [x] Pest: CSV import idempotent and reports bad rows
+- [x] Vitest: filters update URL and restore from URL; empty and error states
 - [ ] Manual: 5,000 products list in under 300 ms locally
 
 ## Phase 3 - Cart and orders with history
@@ -109,7 +109,7 @@ Test gate
 - [ ] Playwright: staff changes order status, customer sees it
 
 ## Phase 7 - Security, performance and quality pass
-Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
+Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. From the Phase 2 review: re-measure catalog search on a production-like server, lower the max `page` or cap deep OFFSET, consider a dedicated search limiter (e.g. 30/min) and stampede protection (`Cache::flexible`/lock) on the filters cache, escape leading `= + - @` in any CSV/XLSX export. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
 
 Test gate
 - [ ] Pest: route-audit test (every non-public route has auth; every `/admin` route has a role)
@@ -121,7 +121,7 @@ Test gate
 - [ ] Load check: catalog search p95 under 500 ms at 50 concurrent users
 
 ## Phase 8 - Deployment and go-live
-Build: production environment (never run demo seeders; `RolesSeeder` only), Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.
+Build: production environment (never run demo seeders; `RolesSeeder` and `CategorySeeder` only; deploy checklist: `APP_ENV=production`, `APP_DEBUG=false`; the migration role needs CREATE on the database for `pg_trgm`, verify on managed Postgres in staging), Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.
 
 Test gate
 - [ ] Deploy to staging from CI works; rollback works

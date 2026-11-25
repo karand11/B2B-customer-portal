@@ -1,6 +1,8 @@
 <?php
 
+use App\Models\Category;
 use App\Models\Company;
+use App\Models\Product;
 use App\Models\User;
 use Database\Seeders\RolesSeeder;
 use Illuminate\Cookie\CookieValuePrefix;
@@ -31,6 +33,27 @@ function makeUser(string $role = 'customer', ?Company $company = null, array $at
         'staff' => $factory->staff()->create($attributes),
         'admin' => $factory->admin()->create($attributes),
     };
+}
+
+/** Category by slug, created on first use (shared by catalog tests). */
+function category(string $slug = 'deep-groove-ball'): Category
+{
+    return Category::where('slug', $slug)->first()
+        ?? Category::factory()->create(['slug' => $slug, 'name' => ucfirst(str_replace('-', ' ', $slug))]);
+}
+
+/** Active product with explicit values; category defaults to deep-groove-ball. */
+function makeProduct(string $partNumber, array $attributes = []): Product
+{
+    $attributes += ['category_id' => category()->id];
+
+    return Product::factory()->create(['part_number' => $partNumber, 'name' => "Bearing {$partNumber}"] + $attributes);
+}
+
+/** @return list<string> */
+function partNumbers(TestResponse $response): array
+{
+    return array_column($response->json('data'), 'part_number');
 }
 
 function loginAs(User $user): TestCase
