@@ -9,7 +9,7 @@ Git, PHP 8.3 (extensions: openssl, mbstring, curl, fileinfo, zip, pdo_pgsql), Co
 
 ## Setup and run
 ```bash
-# 1. Services (PostgreSQL on 5432, Mailpit SMTP 1025 / UI http://localhost:8025)
+# 1. Services (PostgreSQL on 5433, Mailpit SMTP 1025 / UI http://localhost:8025)
 docker compose up -d
 
 # 2. API  ->  http://127.0.0.1:8000/api/v1/health
