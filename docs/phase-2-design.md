@@ -71,13 +71,15 @@ No `is_active` on categories (YAGNI). No soft delete.
 | width_mm | numeric(7,2) | NOT NULL, CHECK > 0 |
 | material | varchar(64) | NOT NULL |
 | seal_type | varchar(8) | NOT NULL, CHECK IN ('open','2rs','zz'). Non-sealable families (cylindrical, thrust, needle...) use `open`. |
-| price_cents | bigint | NULL, CHECK >= 0 |
+| price_cents | bigint | NULL, CHECK >= 0, CHECK `products_price_max`: `price_cents IS NULL OR price_cents <= 1000000000` (added by the later migration `2026_11_27_100004`; same constant as `Product::MAX_PRICE_CENTS`) |
 | price_on_request | boolean | NOT NULL default false |
 | stock_status | varchar(16) | NOT NULL default 'on_order', CHECK IN ('in_stock','low_stock','out_of_stock','on_order') |
 | active | boolean | NOT NULL default true |
 | created_at, updated_at | timestamp | nullable |
 
 Table CHECK `products_price_consistent`: `(price_on_request AND price_cents IS NULL) OR (NOT price_on_request AND price_cents IS NOT NULL)`.
+
+Price cap (`products_price_max`): `price_cents` is at most 1,000,000,000 cents ($10M per unit), enforced in three places that must agree: the DB CHECK (migration `2026_11_27_100004`), the importer (bad row, see section 6) and `Product::MAX_PRICE_CENTS`. Why: Phase 3 allows 100 cart lines x 9999 units, so the largest total is 100 x 9999 x 10^9 = 9.999e14. That fits Postgres `bigint` and a PHP int and stays below JavaScript `Number.MAX_SAFE_INTEGER` (9.007e15), so cart and order totals are exact integers in the browser (no BigInt, no rounding).
 
 Why a generated column: one source of truth in the database. `Product::upsert()` (used by the import) bypasses Eloquent events, so an app-side mutator would let `part_number_search` drift; a generated column cannot. The PHP normaliser used on `q` (`strtolower` then `preg_replace('/[^a-z0-9]/', '', $q)`, ASCII only, no `/u` flag) must stay byte-identical in behaviour with the SQL expression; one Pest test asserts equality over a list of tricky inputs (spaces, `-`, `/`, `.`, lowercase, non-ASCII, empty).
 
@@ -124,7 +126,7 @@ Chosen: `pg_trgm` GIN on `part_number_search`, query `part_number_search LIKE '%
 
 ### 3.5 Query construction rules (backend)
 
-- One Form Request `ListProductsRequest` validates and normalises all parameters (`prepareForValidation` splits CSV into arrays; validation errors are mapped back to the parameter name, never `brand.0`; `brand`/`material` use a `preg_match` with the `/u` flag so a NUL byte or invalid UTF-8 fails validation, because Postgres rejects such bytes with a 500).
+- One Form Request `ListProductsRequest` validates and normalises all parameters (`prepareForValidation` splits CSV into arrays; validation errors are mapped back to the parameter name, never `brand.0`; `brand`/`material` use a `preg_match` with the `/u` flag so a NUL byte or invalid UTF-8 fails validation, because Postgres rejects such bytes with a 500). Laravel's `TrimStrings` runs first and strips leading and trailing NUL/control characters from every query parameter (`q` included), so only an INTERIOR NUL or invalid UTF-8 reaches validation as an error; `q=%00` and `q=abc%00` are empty and `abc` (200). The same `/u` check must therefore be applied to `q` as well (interior NUL, invalid UTF-8: 422).
 - Query: `Product::active()->select([list columns, no description])->with('category:id,slug,name')`. Category filter is a subquery on `categories.slug` (no join in the main query, so the eager load stays 1 extra query). Ranges use `>=` and `<=` (inclusive). Multi-value filters use `whereIn`.
 - Sorting: map the whitelist to column + direction in code (`['part_number' => 'part_number_search', 'brand' => 'brand', 'inner_diameter' => 'inner_diameter_mm', 'outer_diameter' => 'outer_diameter_mm', 'width' => 'width_mm', 'price' => 'price_cents']`); never pass the request value to `orderBy`. `price` adds `NULLS LAST` in both directions. Always append `id ASC`.
 - Pagination: `paginate($perPage)` (needs the `count(*)`), response built by a Resource that emits exactly `data` and `meta` (six keys), no `links`.
@@ -203,7 +205,7 @@ UTF-8 (a BOM is stripped), comma delimiter, RFC 4180 quoting, CRLF or LF, first 
 | `width_mm` | yes | same |
 | `material` | yes | 1-64 chars, pattern as `brand`, and must start with a letter or digit |
 | `seal_type` | yes | `open`, `2rs` or `zz` (case-insensitive) |
-| `price_cents` | one of the two | integer >= 0, digits only (no `12.50`, no `$`, no thousands separators). Empty when price on request. |
+| `price_cents` | one of the two | digits only (no `12.50`, no `$`, no sign, no thousands separators; format check first), then an integer from 0 to 1000000000 (`Product::MAX_PRICE_CENTS`, $10M per unit). Longer or larger values are bad rows, never a DB error. Empty when price on request. |
 | `price_on_request` | no (default false) | `true/false/1/0/yes/no` (case-insensitive) or empty |
 | `stock_status` | yes | `in_stock`, `low_stock`, `out_of_stock` or `on_order` |
 | `active` | no (default true) | same boolean forms as `price_on_request` |
@@ -221,6 +223,7 @@ Price rule: exactly one of `price_cents` (non-empty) or `price_on_request = true
    line 14: outer_diameter_mm: must be greater than inner_diameter_mm
    line 22: category: unknown category "tapered-rolller"
    line 31: price_cents: must be a non-negative integer; got "12.50"
+   line 35: price_cents: must be at most 1000000000 (cents); got "2000000000"
    line 40: part_number: duplicate of line 9 (6205-2RS)
    Rows read: 200, created: 150, updated: 47, bad: 3
    ```
@@ -288,7 +291,7 @@ Authorization and visibility:
 9. `ProductResource` exact keys and types (integers, floats, `price_cents` null for price on request, `seal_type`/`stock_status` strings); detail adds only `description`.
 
 Search safety:
-10. `q` values `' OR 1=1 --`, `6205'; DROP TABLE products;--`, `"`, `\`, `%`, `_`, `%%%`, `6_05`, `62%5`, `\%`, an emoji, a NUL byte (`%00`), and invalid UTF-8 (`%FF`) return 200 or 422, never 500, and `%`, `_`, `6_05`, `62%5` return an EMPTY result (wildcards are literal/removed, never "match everything"). The `products` table still exists with the same row count afterwards. `brand=S%00KF` (embedded NUL) and `brand=%FF` return 422. A lone leading or trailing NUL (`brand=%00`, `brand=SKF%00`) is trimmed by `TrimStrings`: 200, same result as the parameter absent (or as `brand=SKF`). A brand containing `%` or `_` in the filter is 422 (pattern) so it cannot act as a wildcard.
+10. `q` values `' OR 1=1 --`, `6205'; DROP TABLE products;--`, `"`, `\`, `%`, `_`, `%%%`, `6_05`, `62%5`, `\%`, an emoji, `%00` alone (trimmed to empty: 200, whole catalog as with no `q`), `abc%00` (trimmed: 200, same as `abc`), an interior NUL (`a%00b`: 422), and invalid UTF-8 (`%FF`: 422) return 200 or 422 as stated, never 500, and `%`, `_`, `6_05`, `62%5` return an EMPTY result (wildcards are literal/removed, never "match everything"). The `products` table still exists with the same row count afterwards. `brand=S%00KF` (embedded NUL) and `brand=%FF` return 422. A lone leading or trailing NUL (`brand=%00`, `brand=SKF%00`) is trimmed by `TrimStrings`: 200, same result as the parameter absent (or as `brand=SKF`). A brand containing `%` or `_` in the filter is 422 (pattern) so it cannot act as a wildcard.
 11. Normaliser parity: PHP normaliser output equals Postgres `part_number_search` for a list of inputs (spaces, `-`, `/`, `.`, mixed case, non-ASCII, leading zeros).
 
 Sorting:
@@ -301,7 +304,7 @@ Rate limit:
 Database and seeders:
 15. Migration: `pg_trgm` extension exists; indexes from 3.3 exist in `pg_indexes` (the trigram index definition contains `gin_trgm_ops` and `WHERE active`); the generated column yields `62052rs` for `6205-2RS` and `62052rs` for `6205 2rs`; inserting a second row with a part number that normalises equal violates UNIQUE; CHECK violations are rejected (outer <= inner, price with price_on_request true, null price with price_on_request false, bad seal or stock value, negative price); deleting a category with products fails (RESTRICT); `part_number_search` cannot be written.
 16. `CategorySeeder` creates 7 categories and is idempotent. `ProductSeeder` with the default count creates at least 200 active products plus inactive ones, all part numbers unique, every CHECK satisfied, a second run changes nothing (deterministic: same part numbers and prices), `CATALOG_SEED_COUNT` is honoured, and it aborts in `production`, `staging` and other non-allowlisted environments. `DatabaseSeeder` in `testing` env seeds products.
-17. Import extras: `--dry-run` writes nothing (row count unchanged) but reports the same bad rows and says `DRY RUN`; missing file, empty file, missing header column exit 2 with nothing imported; BOM and CRLF files work; quoted field with a comma works; `price_cents` `12.50`, `-1`, `abc` are bad rows; `name` or `description` starting with `=`, `+`, `-`, `@`, tab, CR (also after leading spaces) and `brand`/`material` not starting with a letter or digit are bad rows with the messages above; a data record over 1,000,000 bytes is a bad row (`row: line longer than 1000000 bytes`), the rest imports, exit 1, while an over-long header exits 2; the cache is flushed after commit only (not on exit 2, not with `--dry-run`); an update of an existing row is counted as updated and the summary has no unchanged counter; price and price-on-request both set or both empty are bad rows; `6205-2rs` after `6205-2RS` in the same file is a duplicate bad row; import never deletes products missing from the file; `active=false` deactivates and a later file with `active=true` reactivates; import flushes `catalog:filters` (a filters call before and after shows the new brand).
+17. Import extras: `--dry-run` writes nothing (row count unchanged) but reports the same bad rows and says `DRY RUN`; missing file, empty file, missing header column exit 2 with nothing imported; BOM and CRLF files work; quoted field with a comma works; `price_cents` `12.50`, `-1`, `abc` are bad rows; `1000000000` is accepted and `1000000001` and `99999999999999999999` are bad rows with `price_cents: must be at most 1000000000 (cents); got "..."` (nothing reaches the DB, no 500); the DB CHECK `products_price_max` rejects a raw insert of 1000000001 and accepts 1000000000; `name` or `description` starting with `=`, `+`, `-`, `@`, tab, CR (also after leading spaces) and `brand`/`material` not starting with a letter or digit are bad rows with the messages above; a data record over 1,000,000 bytes is a bad row (`row: line longer than 1000000 bytes`), the rest imports, exit 1, while an over-long header exits 2; the cache is flushed after commit only (not on exit 2, not with `--dry-run`); an update of an existing row is counted as updated and the summary has no unchanged counter; price and price-on-request both set or both empty are bad rows; `6205-2rs` after `6205-2RS` in the same file is a duplicate bad row; import never deletes products missing from the file; `active=false` deactivates and a later file with `active=true` reactivates; import flushes `catalog:filters` (a filters call before and after shows the new brand).
 18. `config('catalog.currency')` is returned in `/products/filters` and changes when the config is overridden (not served from the cache).
 19. `pint --test` clean.
 
