@@ -12,6 +12,11 @@ class CompanyFactory extends Factory
 {
     public function definition(): array
     {
-        return ['name' => fake()->unique()->company()];
+        return [
+            'name' => fake()->unique()->company(),
+            // Invoices need a billing address (up to 6 lines); fake and never asserted on.
+            'billing_address' => fake()->streetAddress()."\n".fake()->postcode().' '.fake()->city(),
+            'tax_id' => 'TAX-'.fake()->numerify('########'),
+        ];
     }
 }

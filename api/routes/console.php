@@ -10,3 +10,6 @@ Artisan::command('inspire', function () {
 
 // Materialises expiry (expired is already the effective status at read time; this keeps stored data and history tidy).
 Schedule::command('quotes:expire')->everyFiveMinutes()->withoutOverlapping();
+
+// Materialises overdue (the API already reports the effective status; this keeps stored data and history tidy).
+Schedule::command('invoices:mark-overdue')->hourly()->withoutOverlapping();

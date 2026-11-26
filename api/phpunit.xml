@@ -31,5 +31,7 @@
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
+        <!-- ~1700 tests in one process plus PDF rendering: do not depend on the machine's php.ini (CLI default is 128M) -->
+        <ini name="memory_limit" value="256M"/>
     </php>
 </phpunit>

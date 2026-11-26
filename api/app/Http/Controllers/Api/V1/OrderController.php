@@ -82,6 +82,9 @@ class OrderController extends Controller
     /** Everything OrderDetailResource reads, loaded in a constant number of queries. */
     private function detail(Order $order): Order
     {
-        return $order->load(['items', 'history.actor.roles', 'company:id,name', 'createdBy:id,name', 'quote:id,quote_number']);
+        return $order->load([
+            'items', 'history.actor.roles', 'company:id,name', 'createdBy:id,name', 'quote:id,quote_number',
+            'activeInvoice:id,order_id,public_id,number,status,due_date',
+        ]);
     }
 }

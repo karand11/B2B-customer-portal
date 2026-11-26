@@ -19,6 +19,11 @@ class Company extends Model
         return $this->hasMany(User::class);
     }
 
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
     public function quoteRequests(): HasMany
     {
         return $this->hasMany(QuoteRequest::class);

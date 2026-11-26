@@ -5,7 +5,7 @@ Portal where industrial customers browse a bearings/parts catalog, request quote
 Layout: `api/` (Laravel 12, PHP 8.3) · `web/` (React + TypeScript + Vite) · `docs/` · `docker-compose.yml` (PostgreSQL 16, Mailpit).
 
 ## Prerequisites
-Git, PHP 8.3 (extensions: openssl, mbstring, curl, fileinfo, zip, pdo_pgsql), Composer 2, Node 22.22+ or 24+ (CI uses 24), Docker.
+Git, PHP 8.3 (extensions: openssl, mbstring, curl, fileinfo, zip, pdo_pgsql, dom, xml), Composer 2, Node 22.22+ or 24+ (CI uses 24), Docker.
 
 ## Setup and run
 ```bash
@@ -70,6 +70,15 @@ Import exit codes: `0` ok, `1` some rows were bad (the rest are imported; bad ro
 - `QUOTES_NOTIFY_ADDRESS` in `api/.env` is the mailbox that gets "new quote" mails; if empty, all active staff and admin users do.
 - Quotes expire at the end of their `valid_until` date (UTC). The API shows the expired state immediately; `php artisan schedule:work` runs `quotes:expire` every 5 minutes to store it.
 - Uploaded files are stored privately under `api/storage/app/private/quotes` (never in `public/`) and are only served through the permission-checked download endpoint.
+
+## Invoices and PDFs (Phase 5 on)
+Staff create an invoice with the **Create invoice** button on a confirmed, shipped or delivered order. Customers see and download their own company's invoices as PDF. Invoice numbers (`INV-2026-000123`) are gap-free, are never reused or deleted, and a voided invoice keeps its number.
+
+- **Placeholders, do not go live on the defaults.** The `INVOICING_*` keys in `api/.env.example` (seller name, address, tax id, bank details, footer, payment terms) and the VAT rate are placeholders, not legal advice. In production, issuing an invoice is refused until `INVOICING_SELLER_NAME` is set. Set `INVOICING_VAT_RATE_BP` in basis points (1900 = 19%); catalog prices are treated as net. Have the legal wording and numbering format checked before launch.
+- Customers' billing address and tax id are stored on the company (demo companies have them; there is no edit screen until Phase 6). An invoice cannot be issued without a billing address.
+- `php artisan schedule:work` runs `invoices:mark-overdue` hourly (and `quotes:expire` every 5 minutes). Overdue status is also computed when read, so nothing breaks if the job is not running.
+- PDFs need PHP `memory_limit = 256M` for very long invoices, and a writable `api/storage/fonts`.
+- Demo invoices after `migrate:fresh --seed`: `INV-2026-000001` (paid), `000002` (overdue, Globex), `000003` (stored open but past due, shows Overdue), `000004` (void), `000005` (open, re-issued). Alice and Bob see 000001, 000003, 000004 and 000005; Carol sees 000002; staff and admin see all.
 
 ## Checks (run before finishing any task)
 ```bash

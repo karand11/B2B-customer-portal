@@ -114,6 +114,26 @@ export const api = {
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 
+/**
+ * Binary GET (PDF download). Same-origin cookie session, no CSRF header needed for GET.
+ * Failures become ApiError exactly like `request`, including the 401 session drop.
+ */
+export async function fetchBlob(
+  path: string,
+  accept: string,
+): Promise<{ blob: Blob; headers: Headers }> {
+  const res = await fetch(path, {
+    credentials: 'same-origin',
+    headers: { Accept: accept },
+  });
+  if (!res.ok) {
+    const err = await toApiError(res);
+    if (res.status === 401) onUnauthorized?.();
+    throw err;
+  }
+  return { blob: await res.blob(), headers: res.headers };
+}
+
 /** Safe user-facing text for any error thrown by the wrapper. */
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {

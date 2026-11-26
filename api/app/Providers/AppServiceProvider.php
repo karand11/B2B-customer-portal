@@ -42,6 +42,10 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('quote-uploads-hourly', fn (Request $request) => $this->limit(
             config('quotes.uploads_per_hour'), 'quote-uploads-hourly:'.($request->user()?->id ?: ClientIp::key($request->ip())), 60,
         ));
+        // PDF rendering is CPU heavy: every request that reaches it counts (404s too). The three staff writes share one budget; every attempt counts.
+        RateLimiter::for('invoice-pdf', fn (Request $request) => $this->limit(20, 'invoice-pdf:'.($request->user()?->id ?: ClientIp::key($request->ip()))));
+        RateLimiter::for('invoice-pdf-ip', fn (Request $request) => $this->limit(60, 'invoice-pdf-ip:'.ClientIp::key($request->ip())));
+        RateLimiter::for('invoices-write', fn (Request $request) => $this->limit(30, 'invoices-write:'.($request->user()?->id ?: ClientIp::key($request->ip()))));
         RateLimiter::for('login-ip', fn (Request $request) => $this->limit(20, ClientIp::key($request->ip())));
         RateLimiter::for('password-reset', fn (Request $request) => $this->limit(5, ClientIp::key($request->ip())));
     }

@@ -61,7 +61,7 @@ function NavEntry({ item }: { item: NavItem }) {
 
 export default function Layout() {
   const { user } = useAuth();
-  const wide = /^\/(catalog|orders|quotes|cart|checkout)/.test(
+  const wide = /^\/(catalog|orders|quotes|invoices|cart|checkout)/.test(
     useLocation().pathname,
   );
   const items = user

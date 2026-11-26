@@ -17,6 +17,8 @@ import OrderDetailPage from './features/orders/OrderDetailPage';
 import QuotesPage from './features/quotes/QuotesPage';
 import QuoteDetailPage from './features/quotes/QuoteDetailPage';
 import QuoteFormPage from './features/quotes/QuoteFormPage';
+import InvoicesPage from './features/invoices/InvoicesPage';
+import InvoiceDetailPage from './features/invoices/InvoiceDetailPage';
 
 export default function AppRoutes() {
   return (
@@ -35,6 +37,8 @@ export default function AppRoutes() {
           <Route path="/orders/:number" element={<OrderDetailPage />} />
           <Route path="/quotes" element={<QuotesPage />} />
           <Route path="/quotes/:number" element={<QuoteDetailPage />} />
+          <Route path="/invoices" element={<InvoicesPage />} />
+          <Route path="/invoices/:id" element={<InvoiceDetailPage />} />
           <Route element={<RoleRoute roles={['customer']} />}>
             <Route path="/cart" element={<CartPage />} />
             <Route path="/checkout" element={<CheckoutPage />} />

@@ -15,12 +15,28 @@ const nav = () => screen.findByRole('navigation', { name: /main/i });
 
 describe('roles and routing', () => {
   it.each([
-    ['customer', customer, ['Home', 'Catalog', 'Orders', 'Quotes', 'Cart']],
-    ['staff', staff, ['Home', 'Catalog', 'Orders', 'Quotes', 'Staff area']],
+    [
+      'customer',
+      customer,
+      ['Home', 'Catalog', 'Orders', 'Quotes', 'Invoices', 'Cart'],
+    ],
+    [
+      'staff',
+      staff,
+      ['Home', 'Catalog', 'Orders', 'Quotes', 'Invoices', 'Staff area'],
+    ],
     [
       'admin',
       admin,
-      ['Home', 'Catalog', 'Orders', 'Quotes', 'Staff area', 'Admin area'],
+      [
+        'Home',
+        'Catalog',
+        'Orders',
+        'Quotes',
+        'Invoices',
+        'Staff area',
+        'Admin area',
+      ],
     ],
   ])(
     '%s sees the Catalog nav item and can open /catalog',

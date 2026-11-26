@@ -14,6 +14,9 @@ import {
   type HistoryEntry,
   type OrderDetail,
 } from './api';
+import type { InvoiceStatus } from '../invoices/api';
+import { CreateInvoiceButton } from '../invoices/InvoiceDialogs';
+import { STATUS_LABELS as INVOICE_STATUS_LABELS } from '../invoices/urlState';
 import StatusBadge from './StatusBadge';
 import { STATUS_LABELS } from './urlState';
 
@@ -207,6 +210,20 @@ export default function OrderDetailPage() {
       </p>
       <div className="mb-4 text-sm">
         <p>PO reference: {o.po_reference ?? 'none'}</p>
+        {o.invoice && (
+          <p>
+            <Link
+              to={`/invoices/${o.invoice.id}`}
+              className="text-blue-800 underline"
+            >
+              Invoice {o.invoice.number}
+            </Link>{' '}
+            (
+            {INVOICE_STATUS_LABELS[o.invoice.status as InvoiceStatus] ??
+              o.invoice.status}
+            )
+          </p>
+        )}
         {o.quote_number && (
           <p>
             From quote{' '}
@@ -292,6 +309,7 @@ export default function OrderDetailPage() {
 
       <Timeline history={o.history} />
       {isCustomer && <Actions order={o} />}
+      {!isCustomer && o.can_invoice && <CreateInvoiceButton order={o} />}
     </section>
   );
 }

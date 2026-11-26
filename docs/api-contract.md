@@ -12,7 +12,7 @@ Base path: `/api/v1`. JSON only. Source of truth for backend and frontend agents
   ```json
   { "status": "ok" }
   ```
-- Errors: none expected. Any unhandled failure returns 500 with no stack trace (APP_DEBUG=false in production).
+- Errors: none expected. Any unhandled failure returns 500 with no stack trace (APP_DEBUG=false in production). A failed database query always returns `{"message":"Server Error"}` (see the Phase 1 conventions, 500).
 
 ---
 
@@ -60,6 +60,11 @@ Schema, config, seeders and test plan: `docs/phase-1-design.md`. This section is
   ```json
   { "message": "Too many attempts. Please try again in 42 seconds." }
   ```
+  500 (database failure, global rule for EVERY `api/*` endpoint, added in Phase 5 after the security review): any `Illuminate\Database\QueryException` is answered with exactly the JSON below, also with `APP_DEBUG=true`. The body never contains SQL, bound values, a driver message, a table or constraint name or a stack trace.
+  ```json
+  { "message": "Server Error" }
+  ```
+  Logging of the same failure: one log record with the fixed message `Database query failed.` and ONLY the context keys `sqlstate`, `sql` (the PLACEHOLDER SQL with `?` markers, never with bound values), `connection` and `code`. Bound values and the driver's error message (which can quote the offending row, for example in a unique-violation detail) are NEVER logged, by the handler or anywhere else. Covered by `tests/Feature/ErrorLeakTest.php` (design doc 13.5).
 - Role names are exactly `customer`, `staff`, `admin`. A user has exactly one role.
 - Company scoping rule (Phase 1 and later): `customer` users are bound to one `company_id` taken from the server-side session user, never from request input. `staff` and `admin` have `company_id = null` and may read across companies in later phases. No Phase 1 endpoint accepts `company_id` or `role` from the client; if sent, they are ignored.
 - Email is case-insensitive: the API lowercases and trims it on input.
@@ -1048,3 +1053,254 @@ Deployment notes (Phase 8): PHP `upload_max_filesize=11M` and `post_max_size=12M
 - Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })` with `currency` from the quote body. Staff price inputs accept `^\d{1,7}(\.\d{1,2})?$` up to 10,000,000.00 and are converted to integer cents.
 - Dates: show `valid_until` as "valid through YYYY-MM-DD (end of day, UTC)". `po_reference`, notes, descriptions and attachment names are rendered as plain text nodes, never HTML.
 - 413 shows "The file is too large for the server."; 422 `file` shows the message under the upload control (this includes the company storage limit); 422 `quote` on create shows the message as a form-level error; 422 `body` is a client bug and shows a generic error; 422 `status` shows the message and refetches; 422 `revision` shows "This quote was updated. Please review the new prices." and refetches; 429 shows the Phase 1 "try again in N seconds" message.
+
+---
+
+## Phase 5 - Invoices and PDF download
+
+Schema, numbering, VAT rounding, PDF design, seeders, frontend design and test plan: `docs/phase-5-design.md`. This section is the HTTP contract. All Phase 1 conventions (cookie auth, CSRF header on writes, `Accept: application/json`, error shapes, `{ "data": ... }` wrapping, 429 body and `Retry-After`), Phase 2 conventions (exact 404 body, CSV params, `meta`), Phase 3 conventions (role middleware before limiters and lookups, foreign = 404, `TrimStrings`, money, dates) and the Phase 4 `body` (malformed JSON) rule apply unchanged. All VAT, seller, legal and retention values are configurable PLACEHOLDERS until the user answers the open questions in the design doc.
+
+### Phase 5 rules (apply to every endpoint below)
+
+- Auth: `auth:sanctum`. Guests get 401 on every endpoint.
+- Roles (role middleware runs BEFORE any rate limiter, body validation and lookup, so a wrong role is 403 for every id, existing or not):
+
+  | Group | Endpoints | Allowed roles |
+  | --- | --- | --- |
+  | Reads | `GET /invoices`, `GET /invoices/{invoice}`, `GET /invoices/{invoice}/pdf` | `customer`, `staff`, `admin` |
+  | Staff actions | `POST /orders/{number}/invoice`, `POST /invoices/{invoice}/mark-paid`, `POST /invoices/{invoice}/void` | `staff`, `admin` only (customer: 403) |
+
+  Customers have no write endpoint in this phase. A customer-only user can never create, pay or void.
+- Company scoping: customers: every invoice query includes `invoices.company_id = <session user's company_id>` (model scope `Invoice::visibleTo($user)`), and `InvoicePolicy` re-checks company equality on every loaded invoice (two independent layers). All customer users of one company see all of that company's invoices. Staff and admin (`company_id = null`) are not scoped. A customer whose `company_id` is null sees nothing (list empty, detail and PDF 404). A user with no role sees nothing and gets 403 on role-guarded routes. The company is never read from request input; the `company_id` list filter is staff/admin only.
+- Foreign invoices are 404, never 403: an invoice of another company (detail AND PDF) returns exactly the same status and body as an unknown one: `404 {"message":"Not found."}`. The PDF is authorized exactly like the JSON detail (same scope, same policy method). The only 403s are role errors. The invoice NUMBER is sequential and therefore guessable, so company scoping is the only real protection; the random `id` in the URL is defence in depth only.
+- Public identifiers: invoices are addressed in URLs by `id`, a random lowercase UUID v4 (`3f2b8c1e-4d5a-4b7e-9c10-2a6f5e8d7b90`), global route pattern `{invoice}` = `[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`, enforced by routing BEFORE any middleware: anything else (including an invoice number such as `INV-2026-000001`, uppercase UUIDs, `abc`) is a plain 404 for every role and endpoint. The user-facing `number` (`INV-2026-000123`) is display and search only. No numeric database id, `company_id`, `user_id` or `created_by` appears in any URL or body. `POST /orders/{number}/invoice` uses the existing order `{number}` pattern.
+- Mass assignment: the client may send only the fields documented per endpoint (`due_date`; `paid_on`; `reason`). `company_id`, `order_id`, `number`, `id`, `status`, `issue_date`, `currency`, `po_reference`, `vat_rate_bp`, `subtotal_cents`, `tax_cents`, `total_cents`, `seller`, `buyer`, `items`, `paid_on` (on create), timestamps and any other field are ignored when sent (not 422). Every amount, rate, number, date other than the optional overrides, and every snapshot is computed or copied on the server from the order, the company and `config/invoicing.php`.
+- Money: integer cents (JSON numbers), never strings or floats. `currency` (3-letter code) is copied from the order. `vat_rate_bp` is an integer (basis points, `1900` = 19%, 0 to 5000). `tax_cents = floor((subtotal_cents * vat_rate_bp + 5000) / 10000)` (half up, once, on the subtotal; design doc section 5), `total_cents = subtotal_cents + tax_cents`. `subtotal_cents` is at most 999,900,000,000,000 and `total_cents` at most 1,499,850,000,000,000, exact in PHP, Postgres and JavaScript. Order and quote prices are treated as NET: with a rate above 0 the invoice total is higher than the order total.
+- Dates: `issue_date`, `due_date` and `paid_on` are plain dates `YYYY-MM-DD` (UTC, no time part, no timezone). `created_at` and history `created_at` are ISO 8601 UTC with `Z`. `issue_date` is today (UTC), set by the server, never client-supplied. The server clock is UTC and read only through `now()`.
+- Effective status (important): the `status` in every response is the EFFECTIVE status. A stored `open` invoice whose `due_date` is before today (UTC) is returned as `overdue`, filtered as `overdue`, and has `days_overdue >= 1`, even if `invoices:mark-overdue` has not run. An invoice due TODAY is `open`. `days_overdue` is `today - due_date` in whole days when the effective status is `overdue`, else `0` (always an integer, always present).
+- Input rules: `TrimStrings` applies to every field and query parameter (leading/trailing NUL/control characters stripped; an interior NUL or invalid UTF-8 is 422 on that parameter). `reason` follows the Phase 4 text rules (newline and tab allowed, any other `Cc`/`Cf` character, NUL and invalid UTF-8 rejected). Dates must be real calendar dates in `YYYY-MM-DD` form (not datetimes).
+- Body only (trait `ReadsBodyOnly`): `due_date`, `paid_on` and `reason` are read from the request BODY only (JSON or form-encoded). A query-string value (`?due_date=...`, `?paid_on=...`, `?reason=...`) is IGNORED, never merged and never validated. Consequences: `POST .../void?reason=x` with no body reason is 422 `reason` (required); `POST /orders/{number}/invoice?due_date=2030-01-01` uses the default due date; `POST .../mark-paid?paid_on=...` uses today.
+- Malformed JSON: `POST /orders/{number}/invoice`, `POST .../mark-paid` and `POST .../void` answer 422 with `errors.body` when the request body is NON-EMPTY and does not decode to a JSON object or array (same rule and precedence as Phase 4: 401, 403 and 404 win; never 500). An empty body, `{}` and `[]` are accepted.
+- Rate limits: the shared `api` limiter (60/min per user id) applies to every endpoint. Additionally `GET /invoices/{invoice}/pdf` (and `HEAD`, see below) has two named limiters: `invoice-pdf`, 20 requests per 60 s per user id, and `invoice-pdf-ip`, 60 requests per 60 s per client IP (key `ClientIp::key`: IPv4 as is, IPv6 collapsed to its /64), so several accounts behind one address cannot multiply the rendering budget. Every request that reaches them counts, including 404 and HEAD. The three staff write endpoints share `invoices-write`: 30 requests per 60 s per user id (every attempt counts, including 422). 429 uses the standard body and `Retry-After`. The role 403 always comes before the 429.
+- Check order for the PDF route: route pattern (404) then authentication (401) then role (403) then limiters `api`, `invoice-pdf`, `invoice-pdf-ip` (429) then, for `HEAD` only, 405 (before any lookup or rendering), then lookup with company scope (404), policy (404), render.
+- Check order for body endpoints: route pattern (404) then authentication (401) then role (403) then rate limiter (429) then body validation (422, format only) then lookup with company scope (404) then policy (404/403) then state and business rules under the row lock (422).
+- Query count: constant in the number of rows, lines and history entries. Bounds: list 6, detail 8, PDF 6, order detail 11. Measured excluding the session-user query: list 3, detail 6, PDF 3, order detail 9 (design doc section 10).
+- Immutability: an issued invoice's number, dates, amounts, rate, items, `seller` and `buyer` snapshots never change (enforced by database triggers). Only `status` and `paid_on` change. There is no endpoint to edit, delete or re-date an invoice, and invoices are never deleted. `paid` and `void` are final in the database too: once the stored status is `paid` or `void`, a trigger refuses any change of `status` or `paid_on` (only `updated_at` may change); the legal transitions (`open` to `paid`, `open` to `overdue`, `overdue` to `paid`, `open` to `void`, `overdue` to `void`) still work.
+
+### InvoiceResource (list items)
+
+```json
+{
+  "id": "3f2b8c1e-4d5a-4b7e-9c10-2a6f5e8d7b90",
+  "number": "INV-2026-000123",
+  "status": "overdue",
+  "currency": "USD",
+  "subtotal_cents": 107079,
+  "vat_rate_bp": 1900,
+  "tax_cents": 20345,
+  "total_cents": 127424,
+  "issue_date": "2026-11-26",
+  "due_date": "2026-12-26",
+  "paid_on": null,
+  "days_overdue": 12,
+  "order_number": "ORD-K7Q2M-X9PA3",
+  "po_reference": "PO-4711/A",
+  "line_count": 3,
+  "company": { "id": 1, "name": "Northwind Machinery Ltd" },
+  "created_at": "2026-11-26T10:15:00Z"
+}
+```
+
+Exactly these keys (no numeric invoice id, no `company_id`, no user, no email). `status` is one of `open|overdue|paid|void` (effective). `paid_on` is a date for `paid` invoices, else `null`. `po_reference` is the order's PO reference (string or `null`, plain text). `company.name` is the buyer name SNAPSHOTTED on the invoice (it does not change if the company is renamed). `order_number` is the snapshotted order number. All keys are always present.
+
+### InvoiceDetailResource (detail, create, mark-paid, void)
+
+InvoiceResource plus `seller`, `buyer`, `items`, `history`, `allowed_actions`:
+
+```json
+{
+  "data": {
+    "id": "3f2b8c1e-4d5a-4b7e-9c10-2a6f5e8d7b90",
+    "number": "INV-2026-000123",
+    "status": "open",
+    "...": "all InvoiceResource keys",
+    "seller": {
+      "name": "PLACEHOLDER SELLER NAME",
+      "address_lines": ["PLACEHOLDER Street 1", "00000 PLACEHOLDER City", "PLACEHOLDER Country"],
+      "tax_id": "PLACEHOLDER-VAT-ID",
+      "email": "billing@example.invalid",
+      "phone": "+00 000 000000",
+      "bank": { "account_holder": "PLACEHOLDER", "bank_name": "PLACEHOLDER BANK", "iban": "XX00 PLACEHOLDER IBAN", "bic": "PLACEHOLDER" },
+      "payment_terms_text": "Please pay by bank transfer and quote the invoice number. (PLACEHOLDER TEXT)",
+      "footer": "PLACEHOLDER legal footer: registered office, registration number, managing directors.",
+      "vat_label": "VAT"
+    },
+    "buyer": { "name": "Northwind Machinery Ltd", "address_lines": ["12 Example Road", "Sampletown"], "tax_id": "NW-TAX-0001" },
+    "items": [
+      {
+        "position": 1,
+        "part_number": "6205-2RS",
+        "name": "Deep groove ball bearing 6205-2RS 25x52x15",
+        "brand": "SKF",
+        "quantity": 3,
+        "unit_price_cents": 1250,
+        "line_total_cents": 3750
+      },
+      {
+        "position": 2,
+        "part_number": null,
+        "name": "Taper roller bearing 32208, SKF or equivalent",
+        "brand": null,
+        "quantity": 10,
+        "unit_price_cents": 333,
+        "line_total_cents": 3330
+      }
+    ],
+    "history": [
+      {
+        "from_status": null,
+        "to_status": "open",
+        "actor": { "name": "Sam Staff", "role": "staff" },
+        "note": null,
+        "created_at": "2026-11-26T10:15:00Z"
+      }
+    ],
+    "allowed_actions": ["download", "mark_paid", "void"]
+  }
+}
+```
+
+Rules:
+- `seller` and `buyer` are the SNAPSHOTS taken at issue time (never the live config or company). Their keys are always emitted in the order shown in the example above (the database stores them as jsonb, which reorders keys; the resource re-emits them in this order). `address_lines` are arrays of plain strings; `tax_id`, `email`, `phone` and bank fields may be `null`. `seller.name` and `buyer.name` are never null.
+- `items` are the order's snapshot lines copied at issue time (`part_number` and `brand` are `null` for free-text quote lines; `name` then holds the description), ordered by `position` (1-based, in order-line order). There is no `product_id`. `line_total_cents = unit_price_cents * quantity`; `subtotal_cents` equals the sum of `line_total_cents`.
+- `history`: oldest first, first entry `from_status: null, to_status: "open"`. One entry per STORED status change (an effective overdue invoice that the command has not yet materialised has no `overdue` entry yet; clients derive overdue from `status`/`days_overdue`). `from_status`/`to_status` are stored values (`open|overdue|paid|void`). `actor.role` is `staff`, `admin` (staff viewer), `customer` (never in this phase) or `system` (`name` null, for the overdue command). For a CUSTOMER viewer staff and admin actors are `{ "name": null, "role": "staff" }`. `note` is the void reason for staff and admin viewers and ALWAYS `null` for customers (the reason is internal).
+- `allowed_actions` is computed by the server for the VIEWER and the effective status (single source for the UI): customer: `["download"]`; staff and admin: `["download","mark_paid","void"]` while the effective status is `open` or `overdue`, else `["download"]` (paid and void are terminal; a void invoice can still be downloaded, with a VOID banner).
+
+### GET /api/v1/invoices
+- Auth: `auth:sanctum`, roles `customer`, `staff`, `admin`.
+- Scope: customer: own company only (query-level, `visibleTo`). Staff/admin: all companies, narrowed by the optional `company_id` filter.
+- Query parameters:
+
+| Param | Type and rule | Meaning |
+| --- | --- | --- |
+| `status` | CSV, each in `open,overdue,paid,void`, empty items 422 | OR within the list, on the EFFECTIVE status (`open` excludes past-due rows, `overdue` includes them) |
+| `from`, `to` | `YYYY-MM-DD` real dates, inclusive; `from` later than `to` is 422 on `from` | on `issue_date` |
+| `q` | string, trimmed, max 32 | Matches the invoice number OR the order number OR the PO reference. (1) Invoice number and order number: uppercased, every character outside `A-Z0-9` removed, substring match against the stored number without dashes (`inv-2026-1`, `INV2026000123`, `2026000123`, `k7q2` all work); if `q` normalises to empty the number branches match nothing. (2) PO reference: the trimmed `q` as typed, case-insensitive substring, `%`, `_` and `\` literal, null PO never matches. A `q` that matches nothing gives an empty list, never everything. Always inside the viewer's scope |
+| `company_id` | integer >= 1. STAFF/ADMIN ONLY; customers: ignored (no 422) | Filter by company; unknown company gives an empty list |
+| `sort` | one of `issue_date`, `-issue_date`, `due_date`, `-due_date`, `number`, `-number`, `total`, `-total`; default `-issue_date` | Every ordering ends with the internal id ascending as tie-break. `number` orders by `(number_year, number_seq)` |
+| `page` | integer 1 to 10000, default 1 | |
+| `per_page` | integer 1 to 100, default 20 | 101 is 422 |
+
+- `status` with an EMPTY value (`?status=`) is treated as no filter (same as `/orders`); a CSV with an empty item (`open,,paid`, `,open`, `open,`) is 422 `status`.
+- Array syntax, interior NUL and invalid UTF-8 are 422 on that parameter; unknown parameters are ignored.
+- Response 200: `{ "data": [ InvoiceResource ], "meta": { six keys exactly as /orders } }`, no `links`. A page beyond `last_page` is 200 with `data: []`, `from: null`, `to: null`. No matches: `data: []`, `total: 0`, `last_page: 1`.
+- Errors: 401 guest. 422 standard shape, `errors` key = parameter name (never `status.0`). 429. 403, 404: not applicable (customers just get their own rows).
+
+### GET /api/v1/invoices/{invoice}
+- Auth: roles `customer`, `staff`, `admin`. Scope: customer: company must match, else 404; staff/admin: any.
+- Response 200: `{ "data": <InvoiceDetailResource> }`.
+- Errors: 401 guest. 404 `{"message":"Not found."}` for an unknown id, a malformed id (route pattern), and a foreign invoice (all identical). 429. 403, 422: not applicable.
+
+### GET /api/v1/invoices/{invoice}/pdf
+- Auth: roles `customer`, `staff`, `admin`. Scope and policy: identical to `GET /invoices/{invoice}` (`Invoice::visibleTo` then `InvoicePolicy::download`).
+- Request: no body, no query parameters (any are ignored). Role middleware runs before the limiters (403 before 429).
+- Response 200: the PDF, generated on the fly from the immutable snapshot (A4, English, `DejaVu Sans`). Headers exactly:
+  ```
+  Content-Type: application/pdf
+  Content-Disposition: attachment; filename="INV-2026-000123.pdf"
+  Content-Length: <bytes>
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-store, private
+  Content-Security-Policy: default-src 'none'; sandbox
+  ```
+  The filename is `<number>.pdf` built only from the stored invoice number (always `INV-` plus year plus 6 to 9 digits); no user text ever appears in a header. The disposition is always `attachment`. The body starts with `%PDF-`. A void invoice downloads too, with a VOID banner; paid and overdue are not printed. The same invoice downloaded twice is visually identical; byte equality is not guaranteed.
+- Errors: 401 guest (JSON). 404 JSON `{"message":"Not found."}` for unknown, malformed or foreign id. 429 JSON (`api`, `invoice-pdf` or `invoice-pdf-ip`, `Retry-After`). 405 for `HEAD` (below). 403, 422: not applicable (403 only for a role error). Error responses are always JSON, never a PDF or HTML.
+- `HEAD` is NOT supported: it answers `405` with header `Allow: GET` (JSON error body), decided BEFORE any invoice lookup or PDF rendering, so it can never trigger a render and never reveals whether an id exists. Authentication (401), role (403) and all three limiters still run first, so a guest gets 401, a wrong role 403, and a HEAD request COUNTS against `invoice-pdf` and `invoice-pdf-ip` (a client cannot probe for free). Role 403 always comes before 429.
+- Limiters on this route: `api` (60/min per user), `invoice-pdf` (20/min per user id) and `invoice-pdf-ip` (60/min per client IP).
+
+### POST /api/v1/orders/{number}/invoice
+- Purpose: create the invoice for an order. The server is the only source of lines, prices, rate, tax, totals, number, issue date, seller and buyer.
+- Auth: `auth:sanctum` + role `staff` or `admin`. Limiters: `api` and `invoices-write`. The `{number}` is the order number (global pattern; malformed is a plain 404 for every role).
+- Scope: staff are cross-company; the invoice gets `company_id` of the ORDER, server-side.
+- Request body: optional `{ "due_date": "2026-12-31" }`; `{}` or no body is valid. `due_date` is read from the BODY only (a query-string `due_date` is ignored, see "Body only"). `due_date`: absent or `null` means the default (`issue_date + 30` days, `config('invoicing.payment_terms_days')`); otherwise a real date `YYYY-MM-DD` with `today (UTC) <= due_date <= today + 120 days` (`config('invoicing.max_due_days')`); anything else (datetime, array, number, an impossible date, out of range) is 422 `due_date`. Validated before the order lookup, and re-checked inside the transaction against the actual issue date. Every other field is ignored (see mass assignment).
+- Behaviour (one DB transaction): lock the order row; the order status must be `confirmed`, `shipped` or `delivered` (`config('invoicing.eligible_order_statuses')`); the order must have no non-void invoice; the order must have `tax_cents = shipping_cents = 0` and at least one line; the company must have a billing address; invoicing must be configured (design doc 2.2). Then copy the order lines (and their snapshot values) into `invoice_items`, snapshot seller (config) and buyer (company), allocate the next gap-free number under the counter row lock (as late as possible), set `issue_date` = today (UTC), compute tax and total with the half-up rule, insert the invoice, the items and the first history row (`null -> open`, actor = the user). All or nothing: a failure rolls back and consumes no number. No email.
+- Response 201: `{ "data": <InvoiceDetailResource> }` (`status: "open"`, `history` has one entry, `allowed_actions: ["download","mark_paid","void"]`).
+- Errors:
+  - 401 guest. 403 customer (even for an unknown well-formed number). 419 CSRF. 429 (`api` or `invoices-write`).
+  - 404 unknown or malformed order number.
+  - 422 `due_date`; 422 `body` (malformed JSON); 422 `order`: order status not eligible ("Only confirmed, shipped or delivered orders can be invoiced."), order already has an invoice ("This order already has an invoice."), order has tax or shipping, order has no lines; 422 `company`: the order's company has no billing address, or its billing address has more than 6 lines; 422 `invoice` ("Invoicing is not configured."): invalid VAT rate, payment terms or seller basics in ANY environment, or the SELLER GUARD (below) failing in any environment except `local` and `testing` (production AND staging and every other name). Nothing is created and no number is consumed on any 422.
+  - Seller guard (every environment except `local` and `testing`): issuing is refused when (a) any of seller `name`, each `address_lines` entry, `tax_id`, `email`, `bank.iban`, `bank.bic`, `bank.account_holder`, `bank.bank_name`, `footer`, `payment_terms_text` or `phone` contains `PLACEHOLDER` (case-insensitive, after trimming); (b) `email` ends in `.invalid` (case-insensitive); or (c) a required field is empty after trimming: required are `name`, `tax_id`, `email`, `footer`, `payment_terms_text`, `bank.iban`, `bank.bic`, `bank.account_holder` and at least one non-blank address line (`phone` and `bank.bank_name` may be empty but must not contain the placeholder). A VAT rate of 0 is ALLOWED there (it can be legitimate) but every issue in those environments logs one warning. The basic checks (rate 0 to 5000 integer, terms 0 to 120, name present, address limits and sizes) apply in EVERY environment. The guard runs inside the transaction before the number is allocated, so nothing is written and no number is burned.
+- Concurrency: two simultaneous requests for one order are serialised by the order row lock: one 201, the other 422 `order`. Parallel requests for different orders get distinct consecutive numbers.
+
+### POST /api/v1/invoices/{invoice}/mark-paid
+- Auth: `staff`, `admin`. Limiters: `api`, `invoices-write`. Scope: any invoice (staff are cross-company).
+- Request body: optional `{ "paid_on": "2026-12-20" }`. `paid_on` is read from the BODY only (query string ignored). `paid_on`: absent or `null` = today (UTC); otherwise a real date `YYYY-MM-DD` with `issue_date <= paid_on <= today (UTC)` (422 `paid_on` otherwise; the lower bound is checked under the lock). Records full payment on that date; there are no partial payments and no amount. Other fields ignored.
+- Rule: stored or effective `open` or `overdue` -> `paid`. Sets `status = paid`, `paid_on`, writes one history row (`from_status` = the stored status, actor = the user), under the invoice row lock.
+- Response 200: `{ "data": <InvoiceDetailResource> }`.
+- Errors: 401. 403 customer (before any lookup). 404 unknown or malformed id. 419. 422 `status` (already paid: "This invoice is already paid."; void: "Only open or overdue invoices can be marked as paid."), `paid_on`, `body`. 429. A wrong mark-paid cannot be undone through the API.
+
+### POST /api/v1/invoices/{invoice}/void
+- Auth: `staff`, `admin`. Limiters: `api`, `invoices-write`. Scope: any invoice.
+- Request body: `{ "reason": "Wrong billing address" }`; `reason` required, string, 1 to 500 characters after trimming, text rules above (422 `reason`). Read from the BODY only: `?reason=x` without a body reason is 422 `reason`. Validated before the lookup.
+- Rule: stored or effective `open` or `overdue` -> `void`. History row with `note = reason` (staff and admin viewers only). The number stays consumed and the invoice stays visible (status `void`) to the company and staff; the order can be invoiced again (the new invoice gets the next number). Credit notes do not exist: a PAID invoice cannot be voided.
+- Response 200: `{ "data": <InvoiceDetailResource> }`.
+- Errors: 401. 403 customer. 404 unknown or malformed id. 419. 422 `reason`, `status` (paid or already void: "Only open or overdue invoices can be voided."), `body`. 429.
+
+### Invoice number allocation (not HTTP)
+
+Format `INV-YYYY-NNNNNN` (`INV-2026-000123`): year of the UTC issue date, per-year counter starting at 1 on 1 January, zero padded to 6 digits (7 or more digits after 999,999). Numbers are allocated from the counter table inside the same transaction that inserts the invoice, so a rolled-back creation never consumes a number; they are sequential in issue order, unique, and never reused (void keeps its number). Invoices are never deleted.
+
+### Overdue command (Artisan, not HTTP)
+
+`php artisan invoices:mark-overdue`: sets every stored `open` invoice whose `due_date` is before today (UTC) to `overdue` with a system history entry (actor null); idempotent; scheduled hourly; sends no email. Never touches `paid` or `void`. The effective-status rules above make the API correct even if it has not run.
+
+### Changes to the Phase 3 and Phase 4 contracts (made by this phase)
+
+- `OrderDetailResource` (detail, create, cancel, status change; NOT the list `OrderResource`) gains two keys, positioned right after `quote_number` (the non-void invoice is eager-loaded in the shared order `detail()` helper, so the create, cancel and status-change responses carry `invoice` and `can_invoice` too, not only `GET /orders/{number}`): `invoice` (`{ "id": "<uuid>", "number": "INV-2026-000123", "status": "open" }`, the order's NON-VOID invoice with its effective status, or `null`) and `can_invoice` (boolean; `true` only for staff and admin when the order status is eligible and the order has no non-void invoice; always `false` for customers). Detail query bound grows by one query (10 to 11).
+- `PATCH /orders/{number}/status` and `POST /orders/{number}/cancel` to `cancelled`: refused with 422 `status` ("This order has an invoice. Void the invoice first.") while the order has a non-void invoice. A voided invoice does not block cancellation.
+- Database: `companies` gains nullable `billing_address` (text, at most 6 lines, 500 characters) and `tax_id` (varchar 32). Neither is exposed in any resource except through the invoice `buyer` snapshot; no endpoint edits them in Phase 5 (seeders and Phase 6).
+- Order and quote prices are NET; invoice tax is added on top, computed from the order's snapshot lines (never copied from the order, whose `tax_cents` stays 0).
+
+### Phase 5 endpoint summary
+
+| Method | Path | Guest | Customer | Staff | Admin |
+| --- | --- | --- | --- | --- | --- |
+| GET | /api/v1/invoices | 401 | 200 (own company) | 200 (all) | 200 (all) |
+| GET | /api/v1/invoices/{invoice} | 401 | 200 / 404 foreign | 200/404 | 200/404 |
+| GET | /api/v1/invoices/{invoice}/pdf | 401 | 200 / 404 foreign / 429 | 200/404/429 | 200/404/429 |
+| POST | /api/v1/orders/{number}/invoice | 401 | 403 | 201/404/422/429 | 201/404/422/429 |
+| POST | /api/v1/invoices/{invoice}/mark-paid | 401 | 403 | 200/404/422/429 | 200/404/422/429 |
+| POST | /api/v1/invoices/{invoice}/void | 401 | 403 | 200/404/422/429 | 200/404/422/429 |
+
+(All also return 429 over the `api` limit. A customer on a staff action gets 403 before any lookup; a malformed `{invoice}` or `{number}` is a plain 404 for every role. `HEAD /api/v1/invoices/{invoice}/pdf` is 405 with `Allow: GET` for staff, admin and customer (guest 401). `PUT`/`PATCH`/`DELETE` on `/api/v1/invoices...` and `POST /api/v1/invoices` are not routes: 405. There is no endpoint to edit or delete an invoice.)
+
+### Details decided by the backend (Phase 5)
+
+Small points the contract left open; all are tested and binding:
+- Mark-paid on a `void` invoice: 422 `status` "Only open or overdue invoices can be marked as paid." (already paid keeps "This invoice is already paid.").
+- A company billing address with more than 6 lines: 422 `company` on create.
+- `GET /invoices?status=` (empty value) is no filter; empty CSV items such as `open,,paid` are 422 `status`.
+- `HEAD /invoices/{invoice}/pdf` is 405 with `Allow: GET`, checked before any lookup or render; auth, role and both PDF limiters run first and HEAD counts against them (this replaces the earlier "HEAD renders the PDF" decision).
+- Order create, cancel and status-change responses carry `invoice` and `can_invoice` (shared `detail()` helper).
+- Issuing with placeholder or incomplete seller data: 422 `invoice` in every environment except `local` and `testing` (seller guard, create endpoint above); this replaces the earlier "production only, seller name only" rule.
+- `due_date`, `paid_on` and `reason` are read from the body only; query-string values are ignored (`ReadsBodyOnly`).
+- Final states are also enforced by a database trigger (`paid` and `void` cannot change `status` or `paid_on`).
+- PDF layout rules (binding, design doc 9.4 and 9.5): percentage widths on header cells; the last 4 item rows, the totals block and the payment block form one unsplittable row; footer text limited to 72% of the page width with `Page X of Y` in the right area; PO reference cleaned and wrapped in 20-character runs; bottom page margin 30 mm.
+- Invoice numbers are `INV-YYYY-` plus the sequence zero padded to 6 digits; sequences of 1,000,000 and more are printed unpadded (7 to 9 digits).
+
+### Known limitations (Phase 5, accepted)
+
+- Layout trade-off: totals and payment are never orphaned on a trailing page (they stay with the last 4 item rows), but a SMALL invoice with a VOID banner can leave a mostly empty first page (accepted, cosmetic; content is complete).
+- No credit notes, partial payments, payment reminders, invoice emails, multiple VAT rates, discounts, shipping lines or multi-currency. A wrong mark-paid is corrected outside the portal.
+- The PDF is regenerated on every download from the snapshot (no stored copy); a template change alters how old invoices look.
+- Right-to-left scripts are not shaped in the PDF; emoji and control/format characters are replaced or removed in the PDF only (the stored data and the JSON are untouched).
+- Seller details, VAT rate and legal wording are placeholders until configured; creation is refused in every environment except `local` and `testing` while any seller value is a placeholder or a required one is empty (seller guard).
+- Follow-ups for Phase 7 and 8 (design doc 15 and 16): app DB role without ownership, TRIGGER and TRUNCATE privileges on the invoice tables; optional PDF caching; LGPL notices if the app is distributed; legal review of wording, VAT rate and numbering format.
+
+### Frontend behaviour bound to this contract
+- Routes (inside `ProtectedRoute`): `/invoices` and `/invoices/:id` any logged-in role. Nav: "Invoices" for all roles. `/invoices` URL parameters are exactly the API names: `status` (CSV), `from`, `to`, `q`, `sort`, `page`; `per_page` and `company_id` are not in the URL; defaults omitted; invalid values dropped client-side.
+- `/invoices/:id`: an `:id` that is not a lowercase UUID, or an API 404 (unknown OR foreign), shows the same "Invoice not found" page (no request for the malformed case). Every staff button comes from `allowed_actions`; hiding is a convenience, not security.
+- Overdue highlighting never relies on colour alone: the badge text "Overdue", a warning icon with `aria-hidden`, and visible text "N days overdue" taken from `days_overdue` (the browser clock is not used).
+- Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })` with `currency` from the invoice body; the VAT rate is shown as `vat_rate_bp / 100` percent. Dates are shown as the `YYYY-MM-DD` strings from the API and never parsed with `new Date(string)` (timezone shift).
+- Download: `fetch` with `credentials: 'same-origin'` and `Accept: application/pdf`, then a blob and a temporary `<a download>`; the saved name is the `Content-Disposition` filename if it matches `^INV-\d{4}-\d{6,9}\.pdf$`, else `<number>.pdf`. A non-`application/pdf` response is an error. 401 goes to the login redirect; 404 shows "Invoice not found"; 429 shows the Phase 1 "try again in N seconds" message; the button is disabled while pending.
+- Staff dialogs: Create invoice (order detail, shown when `can_invoice`; optional `due_date`), Mark paid (`paid_on`, max today) and Void (required `reason`, warning that the number stays reserved). Requests contain only those fields. 422 `order`, `company`, `invoice`, `status`, `due_date`, `paid_on`, `reason` messages are shown in the dialog; `status` and `order` also refetch. All invoice text (names, addresses, PO reference, reason) is rendered as text nodes, never HTML.

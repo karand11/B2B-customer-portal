@@ -86,11 +86,18 @@ describe('role-based navigation', () => {
       .getAllByRole('link')
       .map((a) => a.textContent);
 
-  it('customer sees Home, Catalog, Orders, Quotes and Cart', async () => {
+  it('customer sees Home, Catalog, Orders, Quotes, Invoices and Cart', async () => {
     mockApi({ [ME]: meOk(customer) });
     renderApp('/');
     await screen.findByRole('navigation', { name: /main/i });
-    expect(links()).toEqual(['Home', 'Catalog', 'Orders', 'Quotes', 'Cart']);
+    expect(links()).toEqual([
+      'Home',
+      'Catalog',
+      'Orders',
+      'Quotes',
+      'Invoices',
+      'Cart',
+    ]);
     expect(screen.queryByText('Staff area')).toBeNull();
     expect(screen.queryByText('Admin area')).toBeNull();
   });
@@ -104,6 +111,7 @@ describe('role-based navigation', () => {
       'Catalog',
       'Orders',
       'Quotes',
+      'Invoices',
       'Staff area',
     ]);
     expect(screen.queryByText('Admin area')).toBeNull();
@@ -118,6 +126,7 @@ describe('role-based navigation', () => {
       'Catalog',
       'Orders',
       'Quotes',
+      'Invoices',
       'Staff area',
       'Admin area',
     ]);

@@ -48,6 +48,10 @@ export interface OrderDetail extends Order {
   items: OrderItem[];
   history: HistoryEntry[];
   allowed_transitions: OrderStatus[];
+  /** The order's non-void invoice (effective status), or null. */
+  invoice: { id: string; number: string; status: string } | null;
+  /** Server-computed: staff/admin only, eligible status, no active invoice. */
+  can_invoice: boolean;
 }
 export interface OrderList {
   data: Order[];
@@ -72,7 +76,8 @@ export interface ReorderResult {
 }
 
 export const NUMBER_RE = /^[A-Za-z0-9-]{1,32}$/;
-const detailKey = (number: string) => ['orders', 'detail', number] as const;
+export const detailKey = (number: string) =>
+  ['orders', 'detail', number] as const;
 
 export const useOrders = (query: OrderQuery, enabled: boolean) => {
   const search = toSearch(query); // per_page omitted: API default is 20

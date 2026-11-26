@@ -92,6 +92,8 @@ export const order = (o: Partial<OrderDetail> = {}): OrderDetail => ({
     },
   ],
   allowed_transitions: ['cancelled'],
+  invoice: null,
+  can_invoice: false,
   ...o,
 });
 

@@ -96,7 +96,7 @@ it('runs a constant number of queries for the detail regardless of items and his
         $one = queryCount('getJson', "/api/v1/orders/{$small->order_number}");
         $twenty = queryCount('getJson', "/api/v1/orders/{$large->order_number}");
 
-        expect($twenty)->toBe($one)->and($twenty)->toBeLessThanOrEqual(10);
+        expect($twenty)->toBe($one)->and($twenty)->toBeLessThanOrEqual(11); // Phase 5: +1 for the active invoice
     }
 });
 

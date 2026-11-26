@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\OrderStatus;
+use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\OrderStatusHistory;
 use App\Models\User;
@@ -22,6 +23,11 @@ class OrderStatusChanger
                 throw ValidationException::withMessages(['status' => $to === OrderStatus::Cancelled
                     ? 'This order can no longer be cancelled.'
                     : "Cannot change status from {$from->value} to {$to->value}."]);
+            }
+
+            // Lock order is order row first, then invoice rows (IssueInvoice does the same), so issuing and cancelling serialise here.
+            if ($to === OrderStatus::Cancelled && Invoice::where('order_id', $locked->id)->where('status', '<>', 'void')->exists()) {
+                throw ValidationException::withMessages(['status' => 'This order has an invoice. Void the invoice first.']);
             }
 
             $locked->forceFill(['status' => $to])->save();

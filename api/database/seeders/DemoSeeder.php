@@ -19,6 +19,10 @@ class DemoSeeder extends Seeder
         $northwind = Company::firstOrCreate(['name' => 'Northwind Machinery Ltd']);
         $globex = Company::firstOrCreate(['name' => 'Globex Industrial Supply']);
 
+        // Obviously fake billing data for invoices (not mass-assignable and not editable through the API yet).
+        $northwind->forceFill(['billing_address' => "12 Example Road\nSampletown 00000\nExampleland", 'tax_id' => 'NW-TAX-0001'])->save();
+        $globex->forceFill(['billing_address' => "99 Sample Avenue\nTestville 11111\nExampleland", 'tax_id' => 'GX-TAX-0002'])->save();
+
         $users = [
             ['admin', 'Ada Admin', 'admin@portal.test', null],
             ['staff', 'Sam Staff', 'staff@portal.test', null],

@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Carbon;
 
 class Order extends Model
@@ -50,6 +51,18 @@ class Order extends Model
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class)->orderBy('id');
+    }
+
+    /** Every invoice ever issued for this order (void ones included). */
+    public function invoices(): HasMany
+    {
+        return $this->hasMany(Invoice::class);
+    }
+
+    /** The one NON-void invoice (partial unique index invoices_one_active_per_order), if any. */
+    public function activeInvoice(): HasOne
+    {
+        return $this->hasOne(Invoice::class)->where('invoices.status', '<>', 'void');
     }
 
     public function history(): HasMany

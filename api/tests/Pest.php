@@ -3,14 +3,17 @@
 use App\Models\CartItem;
 use App\Models\Category;
 use App\Models\Company;
+use App\Models\Invoice;
 use App\Models\Order;
 use App\Models\Product;
 use App\Models\QuoteRequest;
 use App\Models\User;
 use Database\Seeders\RolesSeeder;
 use Illuminate\Cookie\CookieValuePrefix;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
 
@@ -19,7 +22,7 @@ const TEST_PASSWORD = 'Demo-Passw0rd!';
 const NOT_FOUND = ['message' => 'Not found.'];
 
 const DETAIL_KEYS = [
-    'number', 'status', 'currency', 'subtotal_cents', 'tax_cents', 'shipping_cents', 'total_cents', 'line_count', 'po_reference', 'quote_number',
+    'number', 'status', 'currency', 'subtotal_cents', 'tax_cents', 'shipping_cents', 'total_cents', 'line_count', 'po_reference', 'quote_number', 'invoice', 'can_invoice',
     'company', 'placed_by', 'created_at', 'updated_at', 'items', 'history', 'allowed_transitions',
 ];
 
@@ -27,6 +30,7 @@ pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     ->beforeEach(function () {
         $this->seed(RolesSeeder::class);
+        config(['invoicing' => testInvoicingConfig()]);
         // Stateful (SPA cookie) mode needs an allowed Origin; always ask for JSON.
         $this->withHeaders(['Origin' => 'http://localhost:5173', 'Accept' => 'application/json']);
     })
@@ -184,4 +188,104 @@ function fakeUpload(string $name, string $content): UploadedFile
 function uploadTo(string $number, UploadedFile $file): TestResponse
 {
     return test()->post("/api/v1/quotes/{$number}/attachments", ['file' => $file]);
+}
+
+/** Exact keys of an invoice in a list and in a detail (create, mark-paid and void return the detail). */
+const INVOICE_KEYS = [
+    'id', 'number', 'status', 'currency', 'subtotal_cents', 'vat_rate_bp', 'tax_cents', 'total_cents', 'issue_date', 'due_date', 'paid_on',
+    'days_overdue', 'order_number', 'po_reference', 'line_count', 'company', 'created_at',
+];
+
+const INVOICE_DETAIL_KEYS = [...INVOICE_KEYS, 'seller', 'buyer', 'items', 'history', 'allowed_actions'];
+
+const UUID_V4 = '/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/';
+
+/** Fixed invoicing config for every test, so results never depend on the developer's .env (Linux CI hygiene). */
+function testInvoicingConfig(): array
+{
+    return [
+        'vat_rate_bp' => 0,
+        'vat_label' => 'VAT',
+        'payment_terms_days' => 30,
+        'max_due_days' => 120,
+        'eligible_order_statuses' => ['confirmed', 'shipped', 'delivered'],
+        'seller' => [
+            'name' => 'Test Seller GmbH',
+            'address_lines' => ['Seller Street 1', '10115 Sellertown', 'Sellerland'],
+            'tax_id' => 'SELLER-TAX-1',
+            'email' => 'billing@seller.test',
+            'phone' => '+49 30 000000',
+            'bank' => ['account_holder' => 'Test Seller GmbH', 'bank_name' => 'Test Bank', 'iban' => 'XX00 TEST IBAN', 'bic' => 'TESTBIC'],
+            'payment_terms_text' => 'Pay by bank transfer.',
+            'footer' => 'Test Seller GmbH, registered office Sellertown.',
+        ],
+    ];
+}
+
+/**
+ * An order of the company with [unit price cents, quantity] lines (one fresh product per line), created through the factory.
+ *
+ * @param  list<array{int, int}>  $lines
+ */
+function orderWith(Company $company, array $lines, string $status = 'confirmed', array $attributes = []): Order
+{
+    static $n = 0;
+    $products = [];
+    foreach ($lines as [$price, $quantity]) {
+        $products[] = [makeProduct(sprintf('IVT-%05d', ++$n), ['price_cents' => $price]), $quantity];
+    }
+
+    return Order::factory()->{$status}()->forCompany($company)->withLines($products)->create($attributes);
+}
+
+/** POST /orders/{number}/invoice as the given user. */
+function issueInvoiceAs(User $user, Order|string $order, array $body = []): TestResponse
+{
+    $number = $order instanceof Order ? $order->order_number : $order;
+
+    return test()->actingAs($user)->postJson("/api/v1/orders/{$number}/invoice", $body);
+}
+
+/** The most common invoice fixture: company A order with default catalog lines, invoiced by the factory. */
+function makeInvoice(Company $company, string $state = 'open', array $attributes = []): Invoice
+{
+    return Invoice::factory()->forCompany($company)->{$state}()->create($attributes);
+}
+
+/** Run $statement inside a savepoint and expect the database to reject it, with $needle in the error (a constraint or trigger name or message). */
+function violates(Closure $statement, string $needle): void
+{
+    try {
+        DB::transaction($statement);
+    } catch (QueryException $e) {
+        expect($e->getMessage())->toContain($needle);
+
+        return;
+    }
+
+    test()->fail("The database accepted a row that violates [{$needle}].");
+}
+
+/** The columns of an existing invoice row (without id) with overrides, for raw inserts that must hit a constraint. */
+function invoiceRow(Invoice $invoice, array $overrides = []): array
+{
+    $row = (array) DB::table('invoices')->where('id', $invoice->id)->first();
+    unset($row['id']);
+
+    return array_merge($row, $overrides);
+}
+
+/** $n open invoices for company $company, all due on $due, inserted with two statements (a few hundred rows through the factory would be slow). */
+function bulkOpenInvoices(Company $company, int $n, string $due): void
+{
+    $template = Invoice::factory()->forCompany($company)->issuedOn('2026-11-01')->dueOn($due)->create();
+    $userId = $template->created_by_user_id;
+    DB::statement("INSERT INTO orders (order_number, company_id, created_by_user_id, status, currency, subtotal_cents, tax_cents, shipping_cents, total_cents, created_at, updated_at)
+        SELECT 'ORD-ZZZZZ-' || translate(lpad(to_hex(g), 5, '0'), '0123456789abcdef', 'ABCDEFGHJKMNPQRS'), ?, ?, 'confirmed', 'USD', 1000, 0, 0, 1000, now(), now()
+        FROM generate_series(1, ?) g", [$company->id, $userId, $n]);
+    DB::statement("INSERT INTO invoices (public_id, number, number_year, number_seq, company_id, order_id, order_number, created_by_user_id, status, issue_date, due_date, currency,
+            vat_rate_bp, subtotal_cents, tax_cents, total_cents, seller, buyer, created_at, updated_at)
+        SELECT gen_random_uuid(), 'INV-2026-' || lpad((1000 + o.rn)::text, 6, '0'), 2026, 1000 + o.rn, o.company_id, o.id, o.order_number, o.created_by_user_id, 'open', '2026-11-01', ?::date, 'USD',
+            0, 1000, 0, 1000, ?::jsonb, ?::jsonb, now(), now()
+        FROM (SELECT o.*, row_number() OVER (ORDER BY o.id) AS rn FROM orders o WHERE o.order_number LIKE 'ORD-ZZZZZ-%') o", [$due, json_encode($template->seller), json_encode($template->buyer)]);
 }
