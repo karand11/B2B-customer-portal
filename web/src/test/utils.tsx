@@ -43,6 +43,8 @@ export interface Req {
   method: string;
   headers: Headers;
   body: Record<string, unknown> | null;
+  /** Set instead of `body` for multipart uploads. */
+  form: FormData | null;
 }
 type Handler = Spec | ((req: Req) => Spec | Promise<Spec>);
 
@@ -64,11 +66,13 @@ export function mockApi(routes: Record<string, Handler>) {
   const fn = vi.fn<typeof fetch>(async (input, init) => {
     const method = (init?.method ?? 'GET').toUpperCase();
     const url = String(input);
+    const form = init?.body instanceof FormData ? init.body : null;
     const req: Req = {
       url,
       method,
       headers: new Headers(init?.headers),
-      body: init?.body ? JSON.parse(String(init.body)) : null,
+      body: init?.body && !form ? JSON.parse(String(init.body)) : null,
+      form,
     };
     calls.push(req);
     // Exact "METHOD /path?query" first, then "METHOD /path" for any query string.

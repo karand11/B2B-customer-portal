@@ -5,4 +5,5 @@ export const REASON_LABELS: Record<string, string> = {
   out_of_stock: 'Out of stock',
   cart_full: 'Cart is full',
   quantity_limit: 'Quantity limit reached',
+  not_in_catalog: 'Custom item, not in the catalog',
 };

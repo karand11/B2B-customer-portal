@@ -61,6 +61,16 @@ Import exit codes: `0` ok, `1` some rows were bad (the rest are imported; bad ro
 - Limits: 10 orders per minute per user, at most 100 cart lines, quantity 1 to 9999. Tax and shipping are 0 for now.
 - There is no staff status screen until Phase 6. To move an order along as staff, log in via the API with a cookie jar (see `docs/api-contract.md`, `PATCH /api/v1/orders/{number}/status` with `{"status": "confirmed"}`).
 
+## Quotes and attachments (Phase 4 on)
+`migrate:fresh --seed` also creates 8 demo quotes (local and testing only): Northwind `QUO-NWAAA-AAAA2` to `AAAA7`, Globex `QUO-GXAAA-AAAA2` and `AAAA3`. Customers see only their company's quotes; staff and admin see all and use the same `/quotes` pages to price and send.
+
+- Limits: 50 lines per quote, 10 files per quote, 10 MiB per file, 25 MiB per quote. Allowed attachment types: PDF, PNG, JPEG, TXT, CSV (checked by file content).
+- **PHP upload limits (required for files over about 2 MB).** PHP's defaults (`upload_max_filesize=2M`, `post_max_size=8M`) reject legal uploads. In your `php.ini` set `file_uploads = On`, `upload_max_filesize = 11M`, `post_max_size = 12M`, then restart `php artisan serve`. Check with `php -r "echo ini_get('upload_max_filesize'), ' ', ini_get('post_max_size');"`. (Production also needs Nginx `client_max_body_size 12m`.)
+- **Emails need the queue worker:** run `php artisan queue:listen` (also used for password resets). Read the mails at http://localhost:8025.
+- `QUOTES_NOTIFY_ADDRESS` in `api/.env` is the mailbox that gets "new quote" mails; if empty, all active staff and admin users do.
+- Quotes expire at the end of their `valid_until` date (UTC). The API shows the expired state immediately; `php artisan schedule:work` runs `quotes:expire` every 5 minutes to store it.
+- Uploaded files are stored privately under `api/storage/app/private/quotes` (never in `public/`) and are only served through the permission-checked download endpoint.
+
 ## Checks (run before finishing any task)
 ```bash
 cd api && ./vendor/bin/pest && ./vendor/bin/pint --test

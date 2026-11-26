@@ -8,7 +8,7 @@ use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * List item. No numeric id, company_id or user id (the company object carries its id per the contract).
- * Needs company and createdBy loaded, plus line_count (withCount) or items.
+ * Needs company, createdBy and quote (id, quote_number) loaded, plus line_count (withCount) or items.
  *
  * @mixin Order
  */
@@ -26,6 +26,7 @@ class OrderResource extends JsonResource
             'total_cents' => $this->total_cents,
             'line_count' => $this->getAttribute('line_count') ?? $this->items->count(),
             'po_reference' => $this->po_reference,
+            'quote_number' => $this->quote?->quote_number,
             'company' => ['id' => $this->company->id, 'name' => $this->company->name],
             'placed_by' => ['name' => $this->createdBy->name],
             'created_at' => $this->created_at->utc()->format('Y-m-d\TH:i:s\Z'),

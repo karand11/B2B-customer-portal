@@ -61,7 +61,9 @@ function NavEntry({ item }: { item: NavItem }) {
 
 export default function Layout() {
   const { user } = useAuth();
-  const wide = /^\/(catalog|orders|cart|checkout)/.test(useLocation().pathname);
+  const wide = /^\/(catalog|orders|quotes|cart|checkout)/.test(
+    useLocation().pathname,
+  );
   const items = user
     ? NAV_ITEMS.filter((i) => i.roles.includes(user.role))
     : [];

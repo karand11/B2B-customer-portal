@@ -77,12 +77,12 @@ it('runs a constant number of queries for the list regardless of rows and per_pa
     Order::factory()->count(27)->forCompany($this->w->a, $this->w->a1)->shipped()->create();
     $many = [queryCount('getJson', '/api/v1/orders'), queryCount('getJson', '/api/v1/orders?per_page=5'), queryCount('getJson', '/api/v1/orders?q=PO&status=pending,shipped&from=2026-01-01')];
 
-    expect($many)->toBe($few)->and(max($many))->toBeLessThanOrEqual(8)
+    expect($many)->toBe($few)->and(max($many))->toBeLessThanOrEqual(9)
         ->and(queryCount('getJson', '/api/v1/orders?per_page=100'))->toBe(queryCount('getJson', '/api/v1/orders?per_page=5'));
 
     loginAs($this->w->staff);
     warmUp();
-    expect(queryCount('getJson', '/api/v1/orders'))->toBeLessThanOrEqual(8);
+    expect(queryCount('getJson', '/api/v1/orders'))->toBeLessThanOrEqual(9);
 });
 
 it('runs a constant number of queries for the detail regardless of items and history', function () {
@@ -96,7 +96,7 @@ it('runs a constant number of queries for the detail regardless of items and his
         $one = queryCount('getJson', "/api/v1/orders/{$small->order_number}");
         $twenty = queryCount('getJson', "/api/v1/orders/{$large->order_number}");
 
-        expect($twenty)->toBe($one)->and($twenty)->toBeLessThanOrEqual(9);
+        expect($twenty)->toBe($one)->and($twenty)->toBeLessThanOrEqual(10);
     }
 });
 

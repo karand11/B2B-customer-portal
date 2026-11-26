@@ -481,14 +481,19 @@ describe('accessibility', () => {
     expect(document.getElementById('catalog-filters')).not.toBeNull();
   });
 
-  it('customers get add-to-cart controls but no quote buttons', async () => {
-    setup('/catalog');
+  it('customers get add-to-cart controls and a Request quote link only for price-on-request and out-of-stock rows', async () => {
+    setup('/catalog', { [LIST]: { body: listBody([P1, P2, P3, P4]) } });
     await rows();
     expect(
       screen.getAllByRole('button', { name: 'Add to cart' }).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /quote/i })).toBeNull();
-    expect(screen.queryByRole('link', { name: /quote/i })).toBeNull();
+    const links = screen.getAllByRole('link', { name: /request quote/i });
+    // NU206 is price on request, 6305 is out of stock; the others keep Add to cart only.
+    expect(links.map((a) => a.getAttribute('href'))).toEqual([
+      '/quotes/new?product=18',
+      '/quotes/new?product=20',
+    ]);
   });
 
   it.each([
@@ -498,6 +503,7 @@ describe('accessibility', () => {
     setup('/catalog', { [ME]: meOk(user) });
     await rows();
     expect(screen.queryByRole('button', { name: /cart|quote/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /request quote/i })).toBeNull();
     expect(screen.queryByRole('columnheader', { name: 'Order' })).toBeNull();
     expect(screen.queryByLabelText(/^Quantity for/)).toBeNull();
   });

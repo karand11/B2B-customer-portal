@@ -252,6 +252,74 @@ describe('order detail', () => {
     },
   );
 
+  it('shows the quote an order came from and renders custom lines without catalog fields', async () => {
+    setupApp(PATH, {
+      [URL]: detail(
+        order({
+          quote_number: 'QUO-K7Q2M-X9PA3',
+          items: [
+            ...order().items,
+            {
+              product_id: null,
+              part_number: null,
+              brand: null,
+              name: 'Taper roller bearing 32208, SKF or equivalent',
+              unit_price_cents: 3875,
+              quantity: 4,
+              line_total_cents: 15500,
+            },
+          ],
+        }),
+      ),
+    });
+    await screen.findByRole('heading', { name: /Order ORD-K7Q2M-X9PA3/ });
+    expect(
+      screen.getByRole('link', { name: 'QUO-K7Q2M-X9PA3' }),
+    ).toHaveAttribute('href', '/quotes/QUO-K7Q2M-X9PA3');
+    const t = within(screen.getByRole('table', { name: 'Prices as ordered' }));
+    expect(t.getByText('Custom item')).toBeInTheDocument();
+    expect(
+      t.getByText('Taper roller bearing 32208, SKF or equivalent'),
+    ).toBeInTheDocument();
+    // Only the catalog line links to the catalog.
+    expect(t.getAllByRole('link')).toHaveLength(1);
+  });
+
+  it('does not show a quote link for a cart order', async () => {
+    setupApp(PATH, { [URL]: detail() });
+    await screen.findByRole('heading', { name: /Order ORD/ });
+    expect(screen.queryByText(/From quote/)).toBeNull();
+  });
+
+  it('labels a custom line skipped by Re-order as not in the catalog', async () => {
+    const user = userEvent.setup();
+    setupApp(PATH, {
+      [URL]: detail(),
+      'POST /api/v1/orders/ORD-K7Q2M-X9PA3/reorder': {
+        body: {
+          data: {
+            cart: cartOf([]).data,
+            added: [],
+            skipped: [
+              {
+                product_id: null,
+                part_number: null,
+                name: 'Taper roller bearing 32208, SKF or equivalent',
+                reason: 'not_in_catalog',
+              },
+            ],
+          },
+        },
+      },
+    });
+    await user.click(await screen.findByRole('button', { name: 'Re-order' }));
+    expect(
+      await screen.findByText(
+        'Taper roller bearing 32208, SKF or equivalent: Custom item, not in the catalog',
+      ),
+    ).toBeInTheDocument();
+  });
+
   it('a 404 (unknown or foreign) shows Order not found with a link back', async () => {
     setupApp(PATH, { [URL]: { status: 404, body: { message: 'Not found.' } } });
     expect(

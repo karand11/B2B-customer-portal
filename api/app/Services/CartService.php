@@ -100,18 +100,19 @@ class CartService
     public function reorder(User $user, Order $order): array
     {
         return $this->locked($user, function () use ($user, $order) {
-            $products = Product::whereIn('id', $order->items->pluck('product_id'))->get()->keyBy('id');
+            $products = Product::whereIn('id', $order->items->pluck('product_id')->filter())->get()->keyBy('id');
             $cart = CartItem::where('user_id', $user->id)->get()->keyBy('product_id');
             $added = $skipped = [];
 
             foreach ($order->items as $item) {
-                $line = $cart->get($item->product_id);
-                $reason = $products[$item->product_id]->unavailableReason()
+                $line = $item->product_id === null ? null : $cart->get($item->product_id);
+                // A line created from a custom quote line has no catalog product to re-order.
+                $reason = $item->product_id === null ? 'not_in_catalog' : ($products[$item->product_id]->unavailableReason()
                     ?? (match (true) {
                         $line === null && $cart->count() >= config('orders.max_cart_lines') => 'cart_full',
                         ($line?->quantity ?? 0) + $item->quantity > config('orders.max_quantity') => 'quantity_limit',
                         default => null,
-                    });
+                    }));
 
                 if ($reason !== null) {
                     $skipped[] = ['product_id' => $item->product_id, 'part_number' => $item->part_number, 'name' => $item->name, 'reason' => $reason];

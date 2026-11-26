@@ -324,6 +324,7 @@ describe('orders list pagination', () => {
             },
     });
     await table();
-    expect(loc()).toBe('/orders?page=3');
+    // The jump happens in an effect after the first (empty) page renders.
+    await waitFor(() => expect(loc()).toBe('/orders?page=3'));
   });
 });

@@ -23,7 +23,7 @@ class ListOrdersRequest extends FormRequest
             'from' => ['bail', 'nullable', 'string', $this->dateRule()],
             'to' => ['bail', 'nullable', 'string', $this->dateRule()],
             'q' => ['bail', 'nullable', 'string', 'max:32', $this->cleanText()],
-            'sort' => ['bail', 'nullable', 'string', Rule::in(array_keys(Order::SORTS))],
+            'sort' => ['bail', 'nullable', 'string', Rule::in(array_keys($this->sorts()))],
             'page' => ['bail', 'nullable', 'integer', 'min:1', 'max:10000'],
             'per_page' => ['bail', 'nullable', 'integer', 'min:1', 'max:100'],
         ];
@@ -69,12 +69,24 @@ class ListOrdersRequest extends FormRequest
         ];
     }
 
+    /** @return array<string, mixed> allowed sort keys (overridden by ListQuotesRequest) */
+    protected function sorts(): array
+    {
+        return Order::SORTS;
+    }
+
+    /** @return list<string> */
+    protected function statuses(): array
+    {
+        return OrderStatus::values();
+    }
+
     private function statusCsv(): Closure
     {
         return function (string $attribute, mixed $value, Closure $fail) {
             $items = array_map('trim', explode(',', $value));
 
-            if (! self::clean($value) || array_diff($items, OrderStatus::values()) !== []) {
+            if (! self::clean($value) || array_diff($items, $this->statuses()) !== []) {
                 $fail("The {$attribute} must be a comma separated list of valid statuses.");
             }
         };

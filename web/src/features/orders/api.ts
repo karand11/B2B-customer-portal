@@ -21,16 +21,19 @@ export interface Order {
   total_cents: number;
   line_count: number;
   po_reference: string | null;
+  /** Set when the order was created by accepting a quote. */
+  quote_number: string | null;
   company: { id: number; name: string };
   placed_by: { name: string };
   created_at: string;
   updated_at: string;
 }
+/** Custom quote lines have no product: all three catalog fields are null. */
 export interface OrderItem {
-  product_id: number;
-  part_number: string;
+  product_id: number | null;
+  part_number: string | null;
   name: string;
-  brand: string;
+  brand: string | null;
   unit_price_cents: number;
   quantity: number;
   line_total_cents: number;
@@ -61,8 +64,8 @@ export interface ReorderResult {
   cart: Cart;
   added: { product_id: number; part_number: string; quantity: number }[];
   skipped: {
-    product_id: number;
-    part_number: string;
+    product_id: number | null;
+    part_number: string | null;
     name: string;
     reason: string;
   }[];

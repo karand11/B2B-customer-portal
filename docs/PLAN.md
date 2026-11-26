@@ -77,12 +77,12 @@ Test gate
 Build: `quote_requests`, `quote_items` (free-text lines allowed), statuses submitted/in_review/quoted/accepted/declined/expired, staff pricing and validity date, queued emails both ways, accept converts to order, attachment upload (max 10 MB).
 
 Test gate
-- [ ] Pest: customer creates quote with catalog and free-text lines; other companies cannot see it
-- [ ] Pest: staff prices and sends; customer gets queued email
-- [ ] Pest: accepting creates exactly one order; second accept rejected
-- [ ] Pest: expired quote cannot be accepted
-- [ ] Pest: upload rejects wrong MIME and over 10 MB; files only downloadable by authorized users
-- [ ] Vitest: dynamic quote form validates; status badges render
+- [x] Pest: customer creates quote with catalog and free-text lines; other companies cannot see it
+- [x] Pest: staff prices and sends; customer gets queued email
+- [x] Pest: accepting creates exactly one order; second accept rejected
+- [x] Pest: expired quote cannot be accepted
+- [x] Pest: upload rejects wrong MIME and over 10 MB; files only downloadable by authorized users
+- [x] Vitest: dynamic quote form validates; status badges render
 - [ ] Manual: full round trip in Mailpit
 
 ## Phase 5 - Invoices and PDF download
@@ -109,7 +109,7 @@ Test gate
 - [ ] Playwright: staff changes order status, customer sees it
 
 ## Phase 7 - Security, performance and quality pass
-Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. From the Phase 2 review: re-measure catalog search on a production-like server, lower the max `page` or cap deep OFFSET, consider a dedicated search limiter (e.g. 30/min) and stampede protection (`Cache::flexible`/lock) on the filters cache, escape leading `= + - @` in any CSV/XLSX export. From the Phase 3 review: send an expected subtotal with checkout (or confirm price changes) so a price change between viewing and placing is never silent, dedicated limiters for reorder and order search, trigram index on `orders.po_reference` if volume grows, require `APP_DEBUG=false` and `SESSION_SECURE_COOKIE=true` in every deployed environment. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
+Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: no-referrer` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. From the Phase 2 review: re-measure catalog search on a production-like server, lower the max `page` or cap deep OFFSET, consider a dedicated search limiter (e.g. 30/min) and stampede protection (`Cache::flexible`/lock) on the filters cache, escape leading `= + - @` in any CSV/XLSX export. From the Phase 3 review: send an expected subtotal with checkout (or confirm price changes) so a price change between viewing and placing is never silent, dedicated limiters for reorder and order search, trigram index on `orders.po_reference` if volume grows, require `APP_DEBUG=false` and `SESSION_SECURE_COOKIE=true` in every deployed environment. From the Phase 4 review: staff purge of attachments on closed quotes and a CSV warning in the staff UI, malware scanning of uploads, one-byte text files refused by libmagic (document or relax), dedicated email layout without the API-origin header link, per-user/company storage monitoring. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
 
 Test gate
 - [ ] Pest: route-audit test (every non-public route has auth; every `/admin` route has a role)
@@ -121,7 +121,7 @@ Test gate
 - [ ] Load check: catalog search p95 under 500 ms at 50 concurrent users
 
 ## Phase 8 - Deployment and go-live
-Build: production environment (never run demo seeders; `RolesSeeder` and `CategorySeeder` only; deploy checklist: `APP_ENV=production`, `APP_DEBUG=false`; the migration role needs CREATE on the database for `pg_trgm`, verify on managed Postgres in staging), Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.
+Build: production environment (PHP `upload_max_filesize=11M`/`post_max_size=12M`, Nginx `client_max_body_size 12m`, monitored `QUOTES_NOTIFY_ADDRESS` mailbox, scheduler cron for `quotes:expire`, queue worker for mail, backups include the private `storage/app/private/quotes` files together with the database; never run demo seeders; `RolesSeeder` and `CategorySeeder` only; deploy checklist: `APP_ENV=production`, `APP_DEBUG=false`; the migration role needs CREATE on the database for `pg_trgm`, verify on managed Postgres in staging), Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.
 
 Test gate
 - [ ] Deploy to staging from CI works; rollback works

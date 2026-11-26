@@ -8,15 +8,12 @@ use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\OrderStatusHistory;
 use App\Models\User;
-use App\Support\OrderNumber;
-use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 /** Builds an order from the user's cart. The client supplies nothing but an optional PO reference. */
 class PlaceOrder
 {
-    public function __construct(private CartService $cart) {}
+    public function __construct(private CartService $cart, private OrderInserter $orders) {}
 
     public function handle(User $user, ?string $poReference): Order
     {
@@ -52,7 +49,7 @@ class PlaceOrder
             ]);
             $subtotal = $rows->sum('line_total_cents');
 
-            $order = $this->insertOrder([
+            $order = $this->orders->insert([
                 'company_id' => $user->company_id,
                 'created_by_user_id' => $user->id,
                 'status' => OrderStatus::Pending,
@@ -72,24 +69,5 @@ class PlaceOrder
 
             return $order;
         });
-    }
-
-    /** Retry with a fresh random number on a (practically impossible) collision; the savepoint keeps the transaction usable. */
-    private function insertOrder(array $attributes): Order
-    {
-        for ($attempt = 1; ; $attempt++) {
-            try {
-                return DB::transaction(function () use ($attributes) {
-                    $order = (new Order)->forceFill($attributes + ['order_number' => app(OrderNumber::class)->generate()]);
-                    $order->save();
-
-                    return $order;
-                });
-            } catch (UniqueConstraintViolationException $e) {
-                if ($attempt >= 5) {
-                    throw $e;
-                }
-            }
-        }
     }
 }

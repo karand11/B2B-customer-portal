@@ -118,9 +118,9 @@ function Actions({ order }: { order: OrderDetail }) {
               <>
                 <p className="mt-2 font-semibold">Not added:</p>
                 <ul className="list-disc pl-5 text-sm">
-                  {result.skipped.map((s) => (
-                    <li key={s.product_id}>
-                      {s.part_number} ({s.name}):{' '}
+                  {result.skipped.map((s, i) => (
+                    <li key={s.product_id ?? `custom-${i}`}>
+                      {s.part_number ? `${s.part_number} (${s.name})` : s.name}:{' '}
                       {REASON_LABELS[s.reason] ?? s.reason}
                     </li>
                   ))}
@@ -158,11 +158,13 @@ export default function OrderDetailPage() {
   const valid = NUMBER_RE.test(number);
   const q = useOrder(number, valid);
   const bannerRef = useRef<HTMLDivElement>(null);
-  const placed = (state as { placed?: unknown } | null)?.placed === true;
+  const nav = state as { placed?: unknown; quoteAccepted?: unknown } | null;
+  const placed = nav?.placed === true;
+  const fromQuote = nav?.quoteAccepted === true;
   const loaded = !!q.data;
   useEffect(() => {
-    if (placed && loaded) bannerRef.current?.focus();
-  }, [placed, loaded]);
+    if ((placed || fromQuote) && loaded) bannerRef.current?.focus();
+  }, [placed, fromQuote, loaded]);
 
   if (!valid) return <OrderNotFound />;
   if (q.error instanceof ApiError && q.error.status === 404)
@@ -181,14 +183,16 @@ export default function OrderDetailPage() {
   const isCustomer = user?.role === 'customer';
   return (
     <section>
-      {placed && (
+      {(placed || fromQuote) && (
         <div
           ref={bannerRef}
           tabIndex={-1}
           role="status"
           className="mb-4 rounded border border-green-700 bg-green-50 p-3 text-green-900"
         >
-          Thank you. Order {o.number} was received and is pending confirmation.
+          {fromQuote
+            ? `Quote accepted. Order ${o.number} was created and is pending confirmation.`
+            : `Thank you. Order ${o.number} was received and is pending confirmation.`}
         </div>
       )}
       <Link to="/orders" className="text-blue-800 underline">
@@ -201,7 +205,20 @@ export default function OrderDetailPage() {
         Placed by {o.placed_by.name} on {formatDate(o.created_at)}
         {!isCustomer && <> for {o.company.name}</>}
       </p>
-      <p className="mb-4 text-sm">PO reference: {o.po_reference ?? 'none'}</p>
+      <div className="mb-4 text-sm">
+        <p>PO reference: {o.po_reference ?? 'none'}</p>
+        {o.quote_number && (
+          <p>
+            From quote{' '}
+            <Link
+              to={`/quotes/${o.quote_number}`}
+              className="text-blue-800 underline"
+            >
+              {o.quote_number}
+            </Link>
+          </p>
+        )}
+      </div>
 
       <table className="w-full border-collapse">
         <caption className="mb-1 text-left text-sm">Prices as ordered</caption>
@@ -222,18 +239,25 @@ export default function OrderDetailPage() {
           </tr>
         </thead>
         <tbody>
-          {o.items.map((i) => (
-            <tr key={i.product_id} className="border-b border-slate-300">
+          {o.items.map((i, n) => (
+            <tr
+              key={i.product_id ?? `custom-${n}`}
+              className="border-b border-slate-300"
+            >
               <td className={td}>
-                <Link
-                  to={`/catalog/${i.product_id}`}
-                  className="text-blue-800 underline"
-                >
-                  {i.part_number}
-                </Link>
+                {i.product_id === null ? (
+                  'Custom item'
+                ) : (
+                  <Link
+                    to={`/catalog/${i.product_id}`}
+                    className="text-blue-800 underline"
+                  >
+                    {i.part_number}
+                  </Link>
+                )}
               </td>
               <td className={td}>{i.name}</td>
-              <td className={td}>{i.brand}</td>
+              <td className={td}>{i.brand ?? '—'}</td>
               <td className={td}>
                 {formatMoney(i.unit_price_cents, o.currency)}
               </td>

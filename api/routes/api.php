@@ -7,10 +7,14 @@ use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\OrderController;
 use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProductController;
+use App\Http\Controllers\Api\V1\QuoteAttachmentController;
+use App\Http\Controllers\Api\V1\QuoteController;
 use Illuminate\Support\Facades\Route;
 
 // Order numbers (ORD-XXXXX-XXXXX) are the only public order id; anything else is a 404.
 Route::pattern('number', '[A-Za-z0-9-]{1,32}');
+// Attachments are addressed by random lowercase UUID; anything else never reaches a controller or middleware (404).
+Route::pattern('attachment', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
 
 Route::prefix('v1')->group(function () {
     Route::get('/health', fn () => response()->json(['status' => 'ok']));
@@ -42,6 +46,19 @@ Route::prefix('v1')->group(function () {
             Route::delete('/cart/items/{productId}', [CartController::class, 'remove'])->where('productId', '[0-9]{1,18}');
             Route::post('/orders', [OrderController::class, 'store'])->middleware('throttle:orders-create');
             Route::post('/orders/{number}/reorder', [OrderController::class, 'reorder']);
+
+            Route::post('/quotes', [QuoteController::class, 'store'])->middleware('throttle:quotes-create');
+            Route::post('/quotes/{number}/accept', [QuoteController::class, 'accept']);
+            Route::post('/quotes/{number}/decline', [QuoteController::class, 'decline']);
+        });
+
+        Route::middleware('role:staff|admin')->group(function () {
+            Route::post('/quotes/{number}/review', [QuoteController::class, 'review']);
+            Route::put('/quotes/{number}/pricing', [QuoteController::class, 'pricing']);
+            Route::post('/quotes/{number}/send', [QuoteController::class, 'send']);
+            Route::post('/quotes/{number}/reject', [QuoteController::class, 'reject']);
+            Route::post('/quotes/{number}/reopen', [QuoteController::class, 'reopen']);
+            Route::put('/quotes/{number}/internal-note', [QuoteController::class, 'internalNote']);
         });
 
         Route::patch('/orders/{number}/status', [OrderController::class, 'status'])
@@ -51,6 +68,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/orders', [OrderController::class, 'index']);
             Route::get('/orders/{number}', [OrderController::class, 'show']);
             Route::post('/orders/{number}/cancel', [OrderController::class, 'cancel']);
+
+            Route::get('/quotes', [QuoteController::class, 'index']);
+            Route::get('/quotes/{number}', [QuoteController::class, 'show']);
+            Route::post('/quotes/{number}/attachments', [QuoteAttachmentController::class, 'store'])->middleware(['throttle:quote-uploads', 'throttle:quote-uploads-hourly']);
+            Route::get('/quotes/{number}/attachments/{attachment}', [QuoteAttachmentController::class, 'show']);
+            Route::delete('/quotes/{number}/attachments/{attachment}', [QuoteAttachmentController::class, 'destroy']);
         });
     });
 });

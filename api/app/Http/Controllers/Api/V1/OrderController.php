@@ -25,7 +25,7 @@ class OrderController extends Controller
         $c = $request->criteria();
         $orders = Order::visibleTo($request->user())
             ->filter($c)
-            ->with(['company:id,name', 'createdBy:id,name'])
+            ->with(['company:id,name', 'createdBy:id,name', 'quote:id,quote_number'])
             ->withCount('items as line_count')
             ->paginate($c['per_page'], ['*'], 'page', $c['page']);
 
@@ -82,6 +82,6 @@ class OrderController extends Controller
     /** Everything OrderDetailResource reads, loaded in a constant number of queries. */
     private function detail(Order $order): Order
     {
-        return $order->load(['items', 'history.actor.roles', 'company:id,name', 'createdBy:id,name']);
+        return $order->load(['items', 'history.actor.roles', 'company:id,name', 'createdBy:id,name', 'quote:id,quote_number']);
     }
 }

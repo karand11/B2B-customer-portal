@@ -35,7 +35,7 @@ it('returns the exact list shape with six meta keys and newest first', function 
         ->and(numbers($response))->toBe([$this->o3->order_number, $this->o2->order_number, $this->o1->order_number, $this->o4->order_number])
         ->and(array_keys($response->json('data.0')))->toBe([
             'number', 'status', 'currency', 'subtotal_cents', 'tax_cents', 'shipping_cents', 'total_cents',
-            'line_count', 'po_reference', 'company', 'placed_by', 'created_at', 'updated_at',
+            'line_count', 'po_reference', 'quote_number', 'company', 'placed_by', 'created_at', 'updated_at',
         ])
         ->and($response->json('data.0.created_at'))->toBe('2026-11-05T12:00:00Z')
         ->and($response->json('data.0.po_reference'))->toBe('Job 12/B_7')

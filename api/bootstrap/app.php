@@ -4,6 +4,7 @@ use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Exceptions\PostTooLargeException;
 use Spatie\Permission\Middleware\RoleMiddleware;
 use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
@@ -32,6 +33,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn ($request) => $request->is('api/*', 'sanctum/*') || $request->expectsJson()
         );
+
+        // A body above PHP post_max_size is rejected by the framework before the app sees the file.
+        $exceptions->render(fn (PostTooLargeException $e, $request) => $request->is('api/*')
+            ? response()->json(['message' => 'The upload is too large.'], 413)
+            : null);
 
         // One generic 404 body for api/*: ModelNotFoundException (wrapped by Laravel) must not leak the model class name,
         // and a policy denyAsNotFound() (a plain HttpException 404, not a NotFoundHttpException) must look identical.

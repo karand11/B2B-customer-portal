@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 
-const FOCUSABLE = 'button:not([disabled]), a[href], input:not([disabled])';
+const FOCUSABLE =
+  'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])';
 
 /**
  * Modal confirm: focus moves in (to the safe "keep" button), Tab is trapped,
@@ -12,6 +13,7 @@ export default function ConfirmDialog({
   confirmLabel,
   cancelLabel,
   pending = false,
+  tone = 'danger',
   onConfirm,
   onCancel,
 }: {
@@ -20,6 +22,8 @@ export default function ConfirmDialog({
   confirmLabel: string;
   cancelLabel: string;
   pending?: boolean;
+  /** Red for destructive confirms, blue for the rest. */
+  tone?: 'danger' | 'primary';
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -72,7 +76,9 @@ export default function ConfirmDialog({
             type="button"
             disabled={pending}
             onClick={onConfirm}
-            className="rounded bg-red-700 px-3 py-1 text-white disabled:opacity-60"
+            className={`rounded px-3 py-1 text-white disabled:opacity-60 ${
+              tone === 'danger' ? 'bg-red-700' : 'bg-blue-700'
+            }`}
           >
             {confirmLabel}
           </button>

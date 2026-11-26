@@ -14,6 +14,9 @@ import CartPage from './features/cart/CartPage';
 import CheckoutPage from './features/cart/CheckoutPage';
 import OrdersPage from './features/orders/OrdersPage';
 import OrderDetailPage from './features/orders/OrderDetailPage';
+import QuotesPage from './features/quotes/QuotesPage';
+import QuoteDetailPage from './features/quotes/QuoteDetailPage';
+import QuoteFormPage from './features/quotes/QuoteFormPage';
 
 export default function AppRoutes() {
   return (
@@ -30,9 +33,12 @@ export default function AppRoutes() {
           <Route path="/catalog/:id" element={<ProductDetailPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:number" element={<OrderDetailPage />} />
+          <Route path="/quotes" element={<QuotesPage />} />
+          <Route path="/quotes/:number" element={<QuoteDetailPage />} />
           <Route element={<RoleRoute roles={['customer']} />}>
             <Route path="/cart" element={<CartPage />} />
             <Route path="/checkout" element={<CheckoutPage />} />
+            <Route path="/quotes/new" element={<QuoteFormPage />} />
           </Route>
           <Route element={<RoleRoute roles={['staff', 'admin']} />}>
             <Route path="/staff" element={<StaffPage />} />

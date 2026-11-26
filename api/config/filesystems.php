@@ -33,7 +33,8 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // No signed-URL route for private files: quote attachments live under app/private/quotes and are served only by the API.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],
@@ -45,6 +46,16 @@ return [
             'visibility' => 'public',
             'throw' => false,
             'report' => false,
+        ],
+
+        // Quote attachments: never under public/, never linked, no url. Served only by the authorized download endpoint.
+        'quotes' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/quotes'),
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+            'visibility' => 'private',
         ],
 
         's3' => [

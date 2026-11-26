@@ -1,4 +1,5 @@
 import { useId, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
 import { ApiError, describeError } from '../../lib/api';
 import { QUANTITY_ERROR, parseQuantity, useAddToCart } from './api';
@@ -42,6 +43,13 @@ export default function AddToCart({ product }: Props) {
         <span id={`${id}-why`} className="text-sm">
           {blocked}
         </span>
+        <Link
+          to={`/quotes/new?product=${product.id}`}
+          aria-label={`Request quote for ${product.part_number}`}
+          className="rounded bg-blue-700 px-3 py-1 text-sm text-white"
+        >
+          Request quote
+        </Link>
       </div>
     );
 

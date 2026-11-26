@@ -57,7 +57,8 @@ export async function csrfCookie(): Promise<void> {
 }
 
 interface Options {
-  method?: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  /** A FormData body is sent as multipart: the browser sets the boundary header. */
   body?: unknown;
   /** Bootstrap calls (GET /me) treat 401 as "guest", not as a session loss. */
   skipUnauthorized?: boolean;
@@ -72,9 +73,10 @@ async function request<T>(
   const mutating = method !== 'GET';
   if (mutating && !readXsrf()) await csrfCookie();
 
+  const multipart = body instanceof FormData;
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (mutating) {
-    headers['Content-Type'] = 'application/json';
+    if (!multipart) headers['Content-Type'] = 'application/json';
     const token = readXsrf();
     if (token) headers['X-XSRF-TOKEN'] = token;
   }
@@ -82,7 +84,8 @@ async function request<T>(
     method,
     headers,
     credentials: 'include',
-    body: body === undefined ? undefined : JSON.stringify(body),
+    body:
+      body === undefined ? undefined : multipart ? body : JSON.stringify(body),
   });
 
   if (res.status === 419 && !retried) {
@@ -102,8 +105,12 @@ export const api = {
     request<T>(path, opts),
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'POST', body }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body }),
+  upload: <T>(path: string, form: FormData) =>
+    request<T>(path, { method: 'POST', body: form }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 };
 

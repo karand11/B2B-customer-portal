@@ -7,24 +7,13 @@ import { z } from 'zod';
 import { FormAlert, SubmitButton, TextField } from '../../components/FormParts';
 import { ApiError } from '../../lib/api';
 import { formatMoney } from '../../lib/format';
+import { poReferenceSchema } from '../../lib/poReference';
 import CatalogError from '../catalog/CatalogError';
 import { usePlaceOrder } from '../orders/api';
 import { resetCart, useCart } from './api';
 
 // Same rules as the API (contract: POST /orders). The server stays the authority.
-const schema = z.object({
-  po_reference: z
-    .string()
-    .trim()
-    .max(64, 'Use at most 64 characters.')
-    .refine((v) => v === '' || /^[A-Za-z0-9]/.test(v), {
-      message: 'Must start with a letter or digit.',
-    })
-    .refine((v) => /^[A-Za-z0-9 ._/#-]*$/.test(v), {
-      message:
-        'Only letters, digits, spaces and the characters . - _ / # are allowed.',
-    }),
-});
+const schema = z.object({ po_reference: poReferenceSchema });
 type Values = z.infer<typeof schema>;
 
 export default function CheckoutPage() {

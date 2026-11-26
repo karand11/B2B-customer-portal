@@ -507,12 +507,15 @@ Rules:
   "total_cents": 2500,
   "line_count": 1,
   "po_reference": "PO-4711/A",
+  "quote_number": null,
   "company": { "id": 1, "name": "Northwind Machinery Ltd" },
   "placed_by": { "name": "Alice Customer" },
   "created_at": "2026-11-25T10:15:00Z",
   "updated_at": "2026-11-25T10:15:00Z"
 }
 ```
+
+`quote_number` (added in Phase 4, positioned right after `po_reference`): the `QUO-...` number of the quote this order was created from, or `null` for orders created from the cart; always present.
 
 `po_reference` is the customer's optional purchase-order reference: a string (1 to 64 characters, rules under POST /orders) or `null` when none was given. It is always present as a key. It is plain text: clients must render it as text, never as HTML.
 
@@ -534,6 +537,7 @@ OrderResource plus `items`, `history` and `allowed_transitions`:
     "total_cents": 2500,
     "line_count": 1,
     "po_reference": "PO-4711/A",
+    "quote_number": null,
     "company": { "id": 1, "name": "Northwind Machinery Ltd" },
     "placed_by": { "name": "Alice Customer" },
     "created_at": "2026-11-25T10:15:00Z",
@@ -705,3 +709,329 @@ Rules:
 - Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })` with `currency` taken from the cart or order body (not from `/products/filters`).
 - Checkout has an optional "PO reference" text input (`maxLength` 64, label, hint "Optional. Letters, digits, spaces and . - _ / #"). Client-side Zod validation mirrors the server rules (`String.prototype.trim()`, which is exactly the server's trim set; empty is omitted from the body; control and format characters `/[\p{Cc}\p{Cf}]/u` rejected; max 64; leading letter or digit; allowed characters), invalid blocks the request and shows an inline `role="alert"` error linked with `aria-describedby`/`aria-invalid`; a server 422 `errors.po_reference` is shown on the same field. The body is `{}` when empty, else `{ "po_reference": "<trimmed>" }`. `po_reference` is shown as plain text (a React text node, never `dangerouslySetInnerHTML`) in a "PO reference" column of the history table (an em dash when null) and on the order detail page (row hidden or "None" when null). The `/orders` search input label becomes "Order number or PO reference".
 - 422 on `POST /orders` with `errors.cart`: show the messages, refetch the cart, stay on the checkout page. 429: Phase 1 "try again in N seconds" message.
+
+---
+
+## Phase 4 - Quote requests (RFQ)
+
+Schema, state machine, conversion, attachments, emails, seeders, frontend design and test plan: `docs/phase-4-design.md`. This section is the HTTP contract. All Phase 1 conventions (cookie auth, CSRF header on writes, `Accept: application/json`, error shapes, `{ "data": ... }` wrapping, 429 body and `Retry-After`), Phase 2 conventions (exact 404 body, CSV params, `meta`) and Phase 3 conventions (role middleware before limiters and lookups, foreign = 404, global route pattern for `{number}`, `TrimStrings`, money, dates) apply unchanged.
+
+### Phase 4 rules (apply to every endpoint below)
+
+- Auth: `auth:sanctum`. Guests get 401 on every endpoint.
+- Roles (role middleware runs BEFORE any rate limiter, body validation and quote lookup, so a wrong role is 403 for every number, existing or not):
+
+  | Group | Endpoints | Allowed roles |
+  | --- | --- | --- |
+  | Customer actions | `POST /quotes`, `POST /quotes/{number}/accept`, `POST /quotes/{number}/decline` | `customer` only (staff and admin: 403) |
+  | Staff actions | `POST .../review`, `PUT .../pricing`, `POST .../send`, `POST .../reject`, `POST .../reopen`, `PUT .../internal-note` | `staff`, `admin` only (customer: 403) |
+  | Reads and attachments | `GET /quotes`, `GET /quotes/{number}`, `POST/GET/DELETE .../attachments...` | `customer`, `staff`, `admin` (state and ownership rules below) |
+
+  Dual-role rule: `accept` and `decline` are customer-only in `QuotePolicy` as well as in the role middleware. A user who holds the `customer` role AND a `staff` or `admin` role is refused with 403 on accept and decline (an own-company quote included); the policy never lets a staff role act as a customer.
+
+- Company scoping (same as orders): the company is ALWAYS `users.company_id` of the session user, never request input. Customers: every quote and attachment query includes `quote_requests.company_id = <session user's company_id>` (model scope `QuoteRequest::visibleTo($user)`), attachments are looked up only through the visible quote (never by their own id alone), and `QuotePolicy` re-checks company equality (two independent layers). All customer users of one company see all of that company's quotes and may accept or decline them (Phase 1: equal permissions). Staff and admin (`company_id = null`) are not scoped. A customer whose `company_id` is null sees nothing and cannot create (list empty, detail 404, create 403). A user with no role sees nothing and gets 403 on role-guarded routes.
+- Foreign quotes are 404, never 403: a quote or attachment of another company returns exactly the same status and body as one that does not exist: `404 {"message":"Not found."}` (detail, accept, decline, attachments upload/download/delete, and every staff action reached by staff). The only 403s are role errors (table above). A staff-only action called by a customer is 403 before any lookup, even for a foreign or unknown number.
+- Public identifiers: quotes by `number` (`QUO-K7Q2M-X9PA3`, same random alphabet as orders), attachments by `id` (random UUID v4, lowercase). No numeric database id, `company_id`, `user_id` or `created_by` in any URL or body. `{number}` uses the existing global pattern `[A-Za-z0-9-]{1,32}` (uppercased server-side); `{attachment}` must match the lowercase UUID pattern, otherwise 404 decided by routing before any middleware (even for a wrong role). Order numbers on quote routes are simply unknown (404).
+- Mass assignment: the client may send only the fields documented per endpoint. `company_id`, `created_by`, `status`, `number`, `currency`, `unit_price_cents`, `line_total_cents`, `subtotal_cents`, `tax_cents`, `shipping_cents`, `total_cents`, `valid_until` (customers), `staff_note`/`internal_note` (customers), `revision`, `sent_at`, timestamps and any other field are ignored when sent (not 422). Prices come only from staff via `PUT .../pricing`; all totals are computed on the server from integer cents. Staff-only fields are never accepted from customers (the staff endpoints are 403 for them) and never returned to customers (see Visibility).
+- Money: integer cents (JSON numbers), never strings or floats; `currency` (3-letter code) from `config('catalog.currency')` at creation. `tax_cents` and `shipping_cents` are always 0 and `total_cents = subtotal_cents + tax_cents + shipping_cents`. Per-unit price 0 to 1,000,000,000 (Phase 2 cap); max lines 50 and max quantity 9999 keep every total below 5e14, exact in PHP, Postgres and JavaScript.
+- Dates: timestamps are ISO 8601 UTC with `Z`; `valid_until` is a plain date `YYYY-MM-DD` meaning "the last day the quote can be accepted, inclusive, in UTC". The quote expires at `valid_until + 1 day`, 00:00:00 UTC (`expires_at`). The server clock is UTC and read only through `now()`.
+- Effective status (important): the `status` in every response is the EFFECTIVE status. A stored `quoted` quote whose `valid_until` is before today (UTC) is returned as `expired`, filtered as `expired`, and refused by accept/decline/reopen, even if the `quotes:expire` command has not yet written `expired` to the database. Accept time is authoritative (checked under a row lock).
+- Visibility of unsent drafts: for a CUSTOMER, while the quote has not been sent (`sent_at` null: statuses `submitted`, `in_review`, a reopened quote, or a quote withdrawn before sending) these are hidden: `unit_price_cents`, `line_total_cents`, `subtotal_cents`, `total_cents`, `valid_until`, `expires_at`, `staff_note`, `revision` are `null`, and attachments uploaded by staff are omitted (their download is 404). `internal_note` is NEVER sent to customers: the key does not exist in any customer response. Staff and admin always see everything.
+- Input rules for text (all quote text fields are customer-supplied text: never trusted for any decision, always rendered as text, never HTML): `TrimStrings` applies to every field and query parameter EXCEPT `po_reference` (raw, see below). After trimming, `lines.*.description` rejects any control or format character (Unicode `Cc`, `Cf`, including NUL, ESC, DEL, U+0085, U+200B, and newlines), an interior NUL or invalid UTF-8 is 422 (a leading/trailing NUL is stripped by `TrimStrings` first). `customer_note`, `staff_note`, `internal_note` and `reason` allow newline (LF, CRLF) and tab but reject any other `Cc`/`Cf` character, NUL and invalid UTF-8. Quantity and ids must be real JSON integers (`"2"`, `1.5`, `true` are 422).
+- `po_reference` (create and accept): EXACTLY the Phase 3 rules (optional, raw NUL/UTF-8 check before trimming, JavaScript-equivalent trim, `Cc`/`Cf` rejection, empty becomes null, max 64, `^[A-Za-z0-9][A-Za-z0-9 ._/#-]*$`), implemented by one shared validator used by checkout, quote create and quote accept. Error key `po_reference`.
+- Rate limits: the shared `api` limiter (60/min per user id) applies to every endpoint. Additionally `POST /quotes` has the named limiter `quotes-create`: 10 requests per 60 s per user id (every attempt counts, including 422), and `POST .../attachments` has TWO named limiters, both per user id: `quote-uploads` 20 requests per 60 s and `quote-uploads-hourly` 120 requests per 3600 s (`quotes.uploads_per_hour`, env `QUOTES_UPLOADS_PER_HOUR`). Both count every attempt, including 413/422 that reach the app, and either one can produce the 429. 429 uses the standard body and `Retry-After`. Staff/admin on customer-only routes get 403 (the limiters are not reached): the role 403 always comes before the 429.
+- Quota configuration (all server-side, none client-controllable):
+
+  | Config key | Env | Default | Meaning |
+  | --- | --- | --- | --- |
+  | `quotes.attachments.max_company_bytes` | `QUOTES_COMPANY_MAX_BYTES` | 524288000 (500 MiB) | Total attachment bytes of ALL quotes of one company, closed quotes included. Staff uploads count toward the quote's company. Over the limit: 422 `file` on upload |
+  | `quotes.max_open_per_company` | `QUOTES_MAX_OPEN_PER_COMPANY` | 50 | Open quotes per company; open = `submitted`, `in_review`, `quoted` by EFFECTIVE status (an expired-but-unmaterialised `quoted` quote does not count). Over the limit: 422 `quote` on `POST /quotes` |
+  | `quotes.uploads_per_hour` | `QUOTES_UPLOADS_PER_HOUR` | 120 | `quote-uploads-hourly` limiter, per user |
+  | `quotes.max_notify_recipients` | (config only) | 50 | Cap on staff recipients of `QuoteSubmittedMail` |
+
+  Company storage limit enforcement: inside the quote-lock transaction of an upload the server first locks the quote row, then locks the company row `FOR UPDATE`, then sums the company's attachment bytes and adds the new file. Lock order is always quote, then company (no other code path takes them in the opposite order, so no deadlock).
+- Email failures never fail a request: the mails are queued after the transaction commits; if queueing throws, the error is logged and the 201/200 is returned unchanged. Mail jobs run with 3 tries and backoff `[60, 300]` seconds (design doc section 8). `QuoteSubmittedMail` is queued as ONE message PER staff recipient (never several addresses in one `To`): the recipient is `quotes.notify_address` when configured, else the staff/admin users ordered by id, at most `quotes.max_notify_recipients` (50; a truncation is logged with `Log::warning`). One failing address does not stop the others (each message is queued and retried on its own).
+- Customer-visible `updated_at`: for a CUSTOMER viewer the `updated_at` of a quote is `max(created_at of the latest status-history row, sent_at, created_at)`, not the real column. Staff and admin see the real `updated_at`. So staff saving price drafts or an internal note (which touch the real column but are not customer-visible) are not observable by customers. This applies to `QuoteResource` and `QuoteDetailResource`.
+- Malformed JSON: every quote endpoint that takes a body (`POST /quotes`, `accept`, `decline`, `reject`, `PUT .../pricing`, `send`, `PUT .../internal-note`) answers 422 with `errors.body` (string message) when the request body is NON-EMPTY and does not decode to a JSON object or array (for example `{`, `abc`, `"text"`, `123`, `null`). An empty body, `{}` and `[]` are accepted (then the normal field validation applies). 401, 403 and 404 still take precedence over this 422, and a 500 is never returned. (Verify against the implementation for `accept`, `reject`, `pricing` and `internal-note`, whose field validation otherwise runs before the lookup: the `body` check is the one that must not outrank the 404.) `review` and `reopen` ignore any body.
+- 422 `errors` keys: the body field name; for lines `lines` (list-level problems) and `lines.N.field` (0-based index, for example `lines.1.description`, `lines.0.quantity`, `lines.0.product_id`). Exact placement for create: a `description` that is blank after trimming is on `lines.N.description`; a line with neither `product_id` nor `description` is on `lines.N.product_id`; a line that is not a JSON object is on `lines` (not `lines.N`). Other keys: `status` for a state conflict; `revision`, `valid_until`, `reason`, `file`, `po_reference`, `customer_note`, `internal_note`, `staff_note` for the matching input; `body` for a malformed JSON body (see the rule above); `file` also for the company storage limit (upload); `quote` for too many open quotes (`POST /quotes`).
+- Check order for body endpoints: route pattern (404) then authentication (401) then role (403) then rate limiter (429) then body validation (422, format only) then quote lookup with company scope (404) then policy (404) then state and business rules under the row lock (422). For upload endpoints the lookup and state come BEFORE the file rules (a foreign quote is 404 even with a bad file; a closed quote is 422 `status` even with a bad file). Staff `PUT /pricing` and customer `accept` validate the body before the lookup, as in Phase 3.
+- Query count: constant for list, detail and create (see design doc section 9): list measures 9 queries (test bound 10), detail measures 10 (test bound 11), create has the same number of INSERTs for 1 and 20 lines.
+- Shared code (no behaviour difference visible to clients): `OrderInserter` (retries only on an `orders_order_number_unique` collision) is used by both `POST /orders` and `POST /quotes/{number}/accept`; the `ValidatesPoReference` trait and `PoReference` class give checkout, quote create and quote accept one `po_reference` validator; `ListQuotesRequest` extends `ListOrdersRequest`.
+- Private files: the `local` and `quotes` disks have `serve => false`, so there is no `/storage/...` route; an unsigned `GET /storage/...` is a plain 404 (not 403).
+
+### Statuses and transitions
+
+`status` is one of `submitted|in_review|quoted|accepted|declined|expired`. `accepted`, `declined` and `expired` are terminal. Full matrix with actors (everything not listed is 422 `status`):
+
+| From | To | Who | Endpoint |
+| --- | --- | --- | --- |
+| (new) | submitted | customer | `POST /quotes` |
+| submitted | in_review | staff, admin | `POST /quotes/{number}/review` |
+| submitted, in_review | declined | customer (withdraw) | `POST /quotes/{number}/decline` |
+| submitted, in_review | declined | staff, admin (reject, reason required) | `POST /quotes/{number}/reject` |
+| in_review | quoted | staff, admin | `POST /quotes/{number}/send` |
+| quoted (not expired) | accepted | customer | `POST /quotes/{number}/accept` |
+| quoted (not expired) | declined | customer | `POST /quotes/{number}/decline` |
+| quoted (not expired) | in_review | staff, admin | `POST /quotes/{number}/reopen` |
+| quoted | expired | system | `quotes:expire` command or effective at read |
+
+### QuoteResource (list items)
+
+```json
+{
+  "number": "QUO-K7Q2M-X9PA3",
+  "status": "quoted",
+  "currency": "USD",
+  "line_count": 2,
+  "po_reference": "PO-4711/A",
+  "subtotal_cents": 28000,
+  "tax_cents": 0,
+  "shipping_cents": 0,
+  "total_cents": 28000,
+  "valid_until": "2026-12-31",
+  "company": { "id": 1, "name": "Northwind Machinery Ltd" },
+  "requested_by": { "name": "Alice Customer" },
+  "created_at": "2026-11-25T10:15:00Z",
+  "updated_at": "2026-11-25T11:00:00Z"
+}
+```
+
+Exactly these keys (no numeric quote id, no `company_id`, no `internal_note`, no email). `updated_at` for a customer is the derived value `max(latest status-history row, sent_at, created_at)` (see Phase 4 rules); staff see the real column. `po_reference` string or null (always present). `subtotal_cents`, `total_cents` and `valid_until` are `null` when not yet priced/set, and for customers while hidden (see Visibility). `tax_cents` and `shipping_cents` are 0.
+
+### QuoteDetailResource (detail, create, every action)
+
+QuoteResource plus:
+
+```json
+{
+  "data": {
+    "number": "QUO-K7Q2M-X9PA3",
+    "status": "quoted",
+    "...": "all QuoteResource keys",
+    "customer_note": "Need CE certificates please",
+    "staff_note": "Lead time 3 weeks, ex works.",
+    "internal_note": "Margin ok, supplier confirmed",
+    "revision": 1,
+    "expires_at": "2027-01-01T00:00:00Z",
+    "items": [
+      {
+        "position": 1,
+        "kind": "catalog",
+        "product_id": 17,
+        "part_number": "6205-2RS",
+        "name": "Deep groove ball bearing 6205-2RS 25x52x15",
+        "brand": "SKF",
+        "quantity": 10,
+        "unit_price_cents": 1250,
+        "line_total_cents": 12500
+      },
+      {
+        "position": 2,
+        "kind": "custom",
+        "product_id": null,
+        "part_number": null,
+        "name": "Taper roller bearing 32208, SKF or equivalent",
+        "brand": null,
+        "quantity": 4,
+        "unit_price_cents": 3875,
+        "line_total_cents": 15500
+      }
+    ],
+    "history": [
+      {
+        "from_status": null,
+        "to_status": "submitted",
+        "actor": { "name": "Alice Customer", "role": "customer" },
+        "note": null,
+        "created_at": "2026-11-25T10:15:00Z"
+      }
+    ],
+    "attachments": [
+      {
+        "id": "3f2b8c1e-4d5a-4b7e-9c10-2a6f5e8d7b90",
+        "name": "drawing-rev2.pdf",
+        "mime": "application/pdf",
+        "size_bytes": 482113,
+        "uploaded_by": { "name": "Alice Customer", "role": "customer" },
+        "created_at": "2026-11-25T10:16:00Z"
+      }
+    ],
+    "order": { "number": "ORD-K7Q2M-X9PA3" },
+    "allowed_actions": ["accept", "decline"]
+  }
+}
+```
+
+Rules:
+- `kind` is `catalog` or `custom`. Catalog items are a SNAPSHOT of `part_number`, `name`, `brand` at request time (never change when the product changes or is deactivated); `product_id` is informational (the SPA must tolerate a 404 on the catalog link). Custom items have `product_id`, `part_number`, `brand` all `null` and `name` = the customer's description. `position` (1-based, stable) is how staff address a line in `PUT /pricing`. Items are ordered by `position`.
+- `customer_note`: string or null (visible to the company and staff). `staff_note`: string or null, customers see it only after the quote was sent. `internal_note`: staff/admin responses ONLY (key absent for customers). `revision`: integer (0 for a never-sent quote for staff; null for customers while hidden), incremented on every send; the client echoes it on accept. `expires_at`: `valid_until + 1 day` 00:00:00 UTC or null (hidden like `valid_until`).
+- `history`: status timeline, oldest first, first entry `from_status: null, to_status: "submitted"`. One entry per status change. `actor.role` is `customer`, `staff`, `admin` (staff viewer) or `system` (expiry, `name` null). For a customer viewer staff and admin actors are `{ "name": null, "role": "staff" }`. `note` is the decline/reject reason or null (staff reasons are visible to the customer, customer reasons to staff). An effective-expired quote that the command has not yet materialised has no `expired` history entry yet; clients derive the expiry from `status` and `expires_at`.
+- `attachments`: oldest first. For a customer, staff-uploaded attachments are omitted until `sent_at` is set. `uploaded_by.role` is `customer` or `staff` (admin shown as `staff`). `uploaded_by.name` follows the same masking as `history[].actor`: for a customer viewer a staff or admin uploader is `{ "name": null, "role": "staff" }` (internal names are never shown to customers; customer uploaders keep their name); a staff or admin viewer sees the real name. `name` (the file name, not the uploader) is the sanitised display name; `mime` is one of `application/pdf|image/png|image/jpeg|text/plain|text/csv`. The download URL is `/api/v1/quotes/{number}/attachments/{id}` (not repeated in the body).
+- `order`: `{ "number": "ORD-..." }` once accepted (the order created from this quote), else `null`.
+- `allowed_actions` is computed by the server for the VIEWER and the current effective status (single source for the UI): customer `submitted`/`in_review`: `["decline","attach"]`; `quoted` (unexpired): `["accept","decline"]`; terminal or expired: `[]`. Staff/admin `submitted`: `["review","reject","attach","note"]`; `in_review`: `["price","send","reject","attach","note"]`; `quoted` (unexpired): `["reopen","note"]`; terminal or expired: `["note"]`. (`decline` on `submitted`/`in_review` is a withdrawal; the UI labels it "Withdraw".)
+
+### GET /api/v1/quotes
+- Auth: `auth:sanctum`, roles `customer`, `staff`, `admin`.
+- Scope: customer: own company only (query-level). Staff/admin: all companies, narrowed by the optional `company_id` filter.
+- Query parameters:
+
+| Param | Type and rule | Meaning |
+| --- | --- | --- |
+| `status` | CSV, each in `submitted,in_review,quoted,accepted,declined,expired`, empty items 422 | OR within the list, on the EFFECTIVE status (`quoted` excludes past-validity rows, `expired` includes them) |
+| `from`, `to` | `YYYY-MM-DD` real dates, UTC, inclusive; `from` later than `to` is 422 on `from` | on `created_at` (same as `/orders`) |
+| `q` | string, trimmed, max 32, same rules as `/orders` `q` | Matches the quote number (normalised, substring, without dashes) OR the `po_reference` (case-insensitive substring, `%`, `_`, `\` literal); a `q` that matches neither is an empty list; always inside the viewer's scope |
+| `company_id` | integer >= 1. STAFF/ADMIN ONLY; customers: ignored | Filter by company; unknown company gives an empty list |
+| `sort` | `created_at`, `-created_at`, `number`, `-number`; default `-created_at` | id ascending as tie-break. There is deliberately no sort by price or validity (it could leak unsent draft prices) |
+| `page` | integer 1 to 10000, default 1 | |
+| `per_page` | integer 1 to 100, default 20 | 101 is 422 |
+
+- Array syntax, interior NUL and invalid UTF-8 are 422 on that parameter; leading/trailing NUL/control characters are stripped by `TrimStrings`; unknown parameters are ignored.
+- Response 200: `{ "data": [ QuoteResource ], "meta": { six keys exactly as /orders } }`, no `links`. Page beyond last: 200, `data: []`, `from: null`, `to: null`.
+- Errors: 401 guest. 422 standard shape, `errors` key = parameter name. 429. 403, 404: not applicable.
+- Query count: constant (measures 9, test bound at most 10).
+
+### GET /api/v1/quotes/{number}
+- Auth: roles `customer`, `staff`, `admin`. Scope: customer: company must match, else 404; staff/admin: any.
+- Response 200: `{ "data": <QuoteDetailResource> }` (customer view hides drafts and `internal_note`, see Visibility).
+- Errors: 401 guest. 404 `{"message":"Not found."}` for unknown, malformed or foreign number (identical). 429. 403, 422: not applicable.
+- Query count: constant (measures 10, test bound at most 11).
+
+### POST /api/v1/quotes
+- Auth: `auth:sanctum` + role `customer`. Limiters: `api` and `quotes-create`.
+- Scope: `company_id` = session user's company, `created_by` = session user, both server-side.
+- Request body (JSON):
+  ```json
+  {
+    "po_reference": "PO-4711/A",
+    "customer_note": "Need CE certificates please",
+    "lines": [
+      { "product_id": 17, "quantity": 10 },
+      { "description": "Taper roller bearing 32208, SKF or equivalent", "quantity": 4 }
+    ]
+  }
+  ```
+  - `lines`: required array, 1 to 50 items, each a JSON object with `quantity` (integer 1 to 9999) and EXACTLY ONE of `product_id` (catalog line) or `description` (custom line). Both present, or neither, is 422 on `lines.N.description` / `lines.N.product_id`. `description`: string, 1 to 255 characters after trimming, text rules above. `product_id`: integer >= 1, must exist and be `active` (unknown and inactive give one identical message, "The selected product is not available."), the same product twice in one request is 422 on the second `lines.N.product_id`. Products that are `price_on_request` or `out_of_stock` ARE allowed (that is what quotes are for). Any other key in a line (`unit_price_cents`, `name`, `brand`, ...) is ignored.
+  - `po_reference`: optional, Phase 3 rules. `customer_note`: optional string or null, at most 2000 characters, text rules above; empty after trimming is stored as null.
+  - Ignored if sent: everything in the mass-assignment rule.
+- Behaviour (one DB transaction): insert the quote (`status = submitted`, `currency` from config, random number with collision retry), snapshot catalog lines (`part_number`, `name`, `brand` from the product row inside the transaction), insert items with `position` 1..n and `unit_price_cents = null`, insert the first history row (`null -> submitted`, actor = user). After commit, one queued email `QuoteSubmittedMail` goes to the staff recipients (design doc section 8). A mail failure does not fail the request.
+- Response 201: `{ "data": <QuoteDetailResource> }` (`status: "submitted"`, no prices, `allowed_actions: ["decline","attach"]`). The SPA then uploads attachments one at a time (see attachments).
+- Errors: 401 guest. 403 staff, admin, or a customer with no company. 422 (see keys above; nothing is created on any 422). 429 (`api` or `quotes-create`). 419 CSRF. 404: not applicable.
+
+### POST /api/v1/quotes/{number}/review
+- Auth: `staff`, `admin`. Scope: any quote (staff are cross-company). Request: no body (any field ignored).
+- Rule: `submitted` -> `in_review`. Response 200: `{ "data": <QuoteDetailResource> }` with a new history entry (actor = user).
+- Errors: 401 guest. 403 customer (even for a foreign/unknown number). 404 unknown or malformed number. 422 `status` when the quote is not `submitted`. 429.
+
+### PUT /api/v1/quotes/{number}/pricing
+- Auth: `staff`, `admin`. Saves a DRAFT (nothing is sent to the customer, no email). Idempotent.
+- Request body:
+  ```json
+  {
+    "lines": [ { "position": 1, "unit_price_cents": 1250 }, { "position": 2, "unit_price_cents": null } ],
+    "valid_until": "2026-12-31"
+  }
+  ```
+  - `lines`: optional array (at most 50); each `position` integer matching an existing line (unknown position is 422 `lines.N.position`, a position twice is 422), `unit_price_cents` integer 0 to 1,000,000,000 or `null` (clears the price). Lines not mentioned are unchanged.
+  - `valid_until`: optional; key absent = unchanged; `null` = clear; otherwise a real date `YYYY-MM-DD` with `today (UTC) < date <= today + 365 days` (422 `valid_until` otherwise).
+  - Validation (422) runs before the lookup.
+- Behaviour: quote must be in `in_review` (422 `status` otherwise). Under the row lock the server recomputes each `line_total_cents = unit_price_cents * quantity`, then `subtotal_cents = sum` and `total_cents = subtotal` ONLY when every line is priced, else both stay `null`. No history row (not a status change).
+- Response 200: `{ "data": <QuoteDetailResource> }` (staff view with draft prices).
+- Errors: 401. 403 customer. 404. 422 (`lines`, `lines.N.position`, `lines.N.unit_price_cents`, `valid_until`, `status`). 429.
+
+### POST /api/v1/quotes/{number}/send
+- Auth: `staff`, `admin`.
+- Request body: optional `{ "staff_note": "Lead time 3 weeks" }` (string or null, max 2000, text rules; sets or replaces the customer-visible note; absent keeps the existing one).
+- Rule: `in_review` -> `quoted`. Under the row lock the server requires EVERY line priced (422 `lines`: "All lines must be priced."), `valid_until` set and `today (UTC) < valid_until <= today + 365 days` (422 `valid_until`). Then: `status = quoted`, `sent_at = now`, `revision = revision + 1`, history row (actor = user), and after commit one queued `QuoteSentMail` to the user who created the quote.
+- Response 200: `{ "data": <QuoteDetailResource> }`.
+- Errors: 401. 403 customer. 404. 422 (`status` not `in_review`, `lines`, `valid_until`, `staff_note`). 429.
+
+### POST /api/v1/quotes/{number}/reject
+- Auth: `staff`, `admin`. Request: `{ "reason": "We do not stock this series." }` (required, string, 1 to 500 characters, text rules). Validated before the lookup.
+- Rule: `submitted` or `in_review` -> `declined`; history `note` = reason (visible to the customer). No email in Phase 4.
+- Response 200: `{ "data": <QuoteDetailResource> }`. Errors: 401, 403 customer, 404, 422 (`reason`, `status`), 429.
+
+### POST /api/v1/quotes/{number}/reopen
+- Auth: `staff`, `admin`. Request: no body.
+- Rule: effective `quoted` (not expired) -> `in_review`. Clears `sent_at` (prices, `valid_until`, `staff_note` and staff attachments are hidden from the customer again; `revision` is kept, the next send makes it +1). No email. A customer accept racing with reopen is serialised by the row lock: the loser gets 422.
+- Response 200: `{ "data": <QuoteDetailResource> }`. Errors: 401, 403 customer, 404, 422 `status` (not quoted, or expired), 429.
+
+### PUT /api/v1/quotes/{number}/internal-note
+- Auth: `staff`, `admin`. Allowed in any status. Request: `{ "internal_note": "text" }` (string or null to clear, max 2000, text rules; the key is required). Validated before the lookup.
+- Response 200: `{ "data": <QuoteDetailResource> }`. Errors: 401, 403 customer, 404, 422 (`internal_note`), 429.
+
+### POST /api/v1/quotes/{number}/accept
+- Auth: `customer` (any user of the quote's company). Staff and admin: 403.
+- Request body: `{ "revision": 1, "po_reference": "PO-4711/A" }`. `revision`: required integer 1 to 32767 (the `revision` the client saw in the detail). `po_reference`: optional, Phase 3 rules; when given it becomes the order's PO, else the quote's PO (may be null). Validated before the lookup. Any other field ignored (never a price or total).
+- Behaviour (one transaction under the quote row lock): effective status must be `quoted` and not expired, `revision` must equal the stored one; creates exactly one order from the quote's snapshot lines and staff-set unit prices (not the current catalog), `subtotal = total = quote total`, `tax = shipping = 0`, currency of the quote, `company_id` of the quote, `created_by` = the accepting user, `status = pending`, `po_reference` as above, `quote_request_id` set (UNIQUE: a quote can never have two orders), first order history row `null -> pending` (actor = user, as a normal order); sets the quote to `accepted` with a history row (actor = user). All or nothing. Custom lines become order lines with `product_id`, `part_number`, `brand` null. Catalog availability is NOT re-checked (the agreed quote stands).
+- Response 200: `{ "data": <QuoteDetailResource> }` with `status: "accepted"` and `order.number`. The SPA navigates to `/orders/{order.number}`.
+- Errors: 401 guest. 403 staff/admin. 404 unknown, malformed or foreign quote. 422 `status`: already accepted ("This quote has already been accepted."), declined, expired ("This quote has expired."), still submitted/in_review, i.e. any state other than an unexpired `quoted`; 422 `revision`: missing, not an integer, or not the current revision ("This quote was updated. Please review the new prices."); 422 `po_reference`. Nothing is created on any 422. 429. Parallel accepts: exactly one wins, the other gets 422 `status`.
+
+### POST /api/v1/quotes/{number}/decline
+- Auth: `customer` (company users only). Request: optional `{ "reason": "Price too high" }` (string or null, max 500, text rules).
+- Rule: `submitted` or `in_review` (withdraw) or an unexpired `quoted` -> `declined`; history `note` = reason (visible to staff).
+- Response 200: `{ "data": <QuoteDetailResource> }`. Errors: 401, 403 staff/admin, 404 unknown/foreign, 422 (`status` for terminal or expired, `reason`), 429.
+
+### Attachments
+
+Rules for all three endpoints: allowed roles `customer`, `staff`, `admin`; the quote is first resolved through the company scope (foreign = 404); an attachment is addressed only through its own quote (`/quotes/{number}/attachments/{id}`; an id belonging to another quote is 404); customers get 404 for staff attachments while `sent_at` is null. Files live on a private disk outside the web root with random names; the original name is sanitised and display-only.
+
+Allowed content (by sniffing the file CONTENT, never the client MIME): `.pdf` (`application/pdf`), `.png` (`image/png`), `.jpg`/`.jpeg` (`image/jpeg`), `.txt` (`text/plain`), `.csv` (`text/csv`, `text/plain` or `application/csv` when sniffed). The extension of the sanitised name must be in this list AND the sniffed type must match it; text files must be valid UTF-8 without NUL. Anything else (executables, HTML, SVG, archives, Office files, scripts, a renamed file whose content does not match) is 422. Limits: 10 MiB (10,485,760 bytes) per file, at most 10 files and 25 MiB (26,214,400 bytes) in total per quote, no empty file.
+
+#### POST /api/v1/quotes/{number}/attachments
+- Request: `multipart/form-data` with one part `file`. (CSRF header required; do NOT send `Content-Type: application/json`; the browser sets the multipart boundary.) One file per request.
+- Allowed while the effective status is `submitted` or `in_review` (customers of the company and staff/admin). There is no FormRequest for the file: the controller resolves the route, quote scope and policy, then `QuoteAttachments` takes the quote row lock and runs `AttachmentInspector` (upload error, empty, size, extension, content sniffing, UTF-8/NUL for text) together with the state, per-quote count and total-size checks; only then is the file stored and one row inserted; the uploader's role is recorded. Every file problem is 422 `file`.
+- Response 201: `{ "data": <attachment object as in the detail> }` (`id`, `name`, `mime`, `size_bytes`, `uploaded_by`, `created_at`).
+- Errors: 401 guest. 404 unknown, malformed or foreign quote. 413 `{"message":"The upload is too large."}` when the request body exceeds PHP `post_max_size` (12M recommended; Laravel throws `PostTooLargeException` before the app sees the file, and a render rule in `bootstrap/app.php` turns it into this JSON body for `api/*` paths only). A malformed `{attachment}` id (not a lowercase UUID) never reaches this: it is a plain 404 by route pattern. 422 `status` when the quote is not `submitted`/`in_review`; 422 `file`: missing, not a file or upload failed (`UPLOAD_ERR_*`, for example above PHP `upload_max_filesize`), empty, larger than 10,485,760 bytes (10,485,761 is rejected, exactly 10,485,760 is accepted), extension not allowed, content type does not match the extension, text file not valid UTF-8 or containing NUL, 11th file, total above 25 MiB. 429 (`api` or `quote-uploads`). 403: not applicable (all three roles may call; wrong state is 422).
+
+#### GET /api/v1/quotes/{number}/attachments/{attachment}
+- Response 200: the raw file with headers `Content-Type: <canonical mime of the row>`, `Content-Disposition: attachment; filename="<sanitised name>"` (never `inline`), `X-Content-Type-Options: nosniff`, `Cache-Control: private, no-store`, `Content-Length`. Allowed in every status for everyone who may view the quote (and, for a customer, the attachment).
+- Errors: 401 guest. 404 unknown/malformed number or attachment id, foreign quote, attachment of another quote, staff attachment not yet visible to the customer, or the file is missing on disk (logged, never a 500). 429 (shared `api` bucket). 403, 422: not applicable.
+
+#### DELETE /api/v1/quotes/{number}/attachments/{attachment}
+- Allowed while the effective status is `submitted` or `in_review`. Customers may delete only customer-uploaded attachments they can see; staff/admin any. Hard delete (row and file).
+- Response 204, no body.
+- Errors: 401 guest. 404 as for download (a customer deleting a staff attachment gets 404, since they cannot see it in an open state). 422 `status` when the quote is no longer open. 419 CSRF. 429. 403: not applicable.
+
+### Expiry command (Artisan, not HTTP)
+
+Deployment notes (Phase 8): PHP `upload_max_filesize=11M` and `post_max_size=12M`; Nginx `client_max_body_size 12m`; a monitored `QUOTES_NOTIFY_ADDRESS` mailbox; a scheduler cron (`schedule:run` every minute) for `quotes:expire`; backups must include the private quotes storage together with the database; a queue worker for mail. Details: `docs/phase-4-design.md` section 15.
+
+`php artisan quotes:expire`: sets every stored `quoted` quote whose `valid_until` is before today (UTC) to `expired` with a system history entry (actor null); idempotent; scheduled every five minutes; sends no email. Effective-status rules above make the API correct even if it has not run.
+
+### Changes to the Phase 3 contract (made by this phase)
+
+- `order_items.product_id`, `part_number`, `brand` may be `null` (order lines created from custom quote lines); in `OrderDetailResource.items` they are `null` for such lines (`name` holds the description). The order item `CHECK` requires all three null or all three set.
+- `OrderResource` and `OrderDetailResource` gain the key `quote_number` (string or null, always present; null for orders created from the cart). The key sits right after `po_reference` in both resources (see the Phase 3 examples above). The Phase 3 "exact keys" tests and query-count bounds are updated (orders list at most 9 queries, detail at most 10).
+- `POST /orders/{number}/reorder`: a line with `product_id = null` is skipped with the new reason `not_in_catalog` (`skipped[].product_id` and `part_number` are null, `name` is the description). `reason` is now one of `inactive|price_on_request|out_of_stock|cart_full|quantity_limit|not_in_catalog`.
+- `po_reference` validation is shared (the `ValidatesPoReference` trait and `PoReference` class; no behaviour change). `PlaceOrder`'s number-collision retry moves to the shared `OrderInserter`, which retries only on an `orders_order_number_unique` collision (no behaviour change).
+- Cart behaviour is unchanged: price-on-request products are still rejected by `POST /cart/items`; the catalog now offers "Request quote" for them instead.
+
+### Phase 4 endpoint summary
+
+| Method | Path | Guest | Customer | Staff | Admin |
+| --- | --- | --- | --- | --- | --- |
+| GET | /api/v1/quotes | 401 | 200 (own company) | 200 (all) | 200 (all) |
+| GET | /api/v1/quotes/{number} | 401 | 200 / 404 foreign | 200/404 | 200/404 |
+| POST | /api/v1/quotes | 401 | 201/422/429 | 403 | 403 |
+| POST | /api/v1/quotes/{number}/review | 401 | 403 | 200/404/422 | 200/404/422 |
+| PUT | /api/v1/quotes/{number}/pricing | 401 | 403 | 200/404/422 | 200/404/422 |
+| POST | /api/v1/quotes/{number}/send | 401 | 403 | 200/404/422 | 200/404/422 |
+| POST | /api/v1/quotes/{number}/reject | 401 | 403 | 200/404/422 | 200/404/422 |
+| POST | /api/v1/quotes/{number}/reopen | 401 | 403 | 200/404/422 | 200/404/422 |
+| PUT | /api/v1/quotes/{number}/internal-note | 401 | 403 | 200/404/422 | 200/404/422 |
+| POST | /api/v1/quotes/{number}/accept | 401 | 200 / 404 foreign / 422 | 403 | 403 |
+| POST | /api/v1/quotes/{number}/decline | 401 | 200 / 404 foreign / 422 | 403 | 403 |
+| POST | /api/v1/quotes/{number}/attachments | 401 | 201 / 404 / 413 / 422 / 429 | 201/404/413/422/429 | same |
+| GET | /api/v1/quotes/{number}/attachments/{attachment} | 401 | 200 / 404 | 200/404 | 200/404 |
+| DELETE | /api/v1/quotes/{number}/attachments/{attachment} | 401 | 204 / 404 / 422 | 204/404/422 | 204/404/422 |
+
+(All also return 429 over the rate limits. A customer on a staff action gets 403 before any lookup; a malformed `{number}` or `{attachment}` is a plain 404 for every role. `PUT`/`DELETE` on `/api/v1/quotes` and `POST` on `/api/v1/quotes/{number}` are not routes: 405. There is no endpoint to edit lines, change a customer note or change a PO reference after creation.)
+
+### Frontend behaviour bound to this contract
+- Routes (inside `ProtectedRoute`): `/quotes` and `/quotes/:number` any logged-in role; `/quotes/new` customer only (others get the 403 page). Nav: "Quotes" for all roles. `/quotes` URL parameters are exactly the API names: `status` (CSV), `from`, `to`, `q`, `sort`, `page`; `per_page` and `company_id` are not in the URL; defaults omitted; invalid values dropped client-side.
+- `/quotes/:number`: a `:number` not matching `[A-Za-z0-9-]{1,32}`, or an API 404 (unknown OR foreign), shows the same "Quote not found" page. Every button comes from `allowed_actions`; hiding is a convenience, not security. The Accept request sends `revision` from the loaded detail and, optionally, `po_reference`; nothing else.
+- Quote creation body is exactly `po_reference?`, `customer_note?`, `lines[]` (`product_id` or `description`, plus `quantity`); never a price, name or total. Attachments are uploaded after the create, one request per file, `FormData` field `file`, `X-XSRF-TOKEN` header, no manual `Content-Type`. A failed upload never re-creates the quote.
+- Catalog entry point: for customers, price-on-request and out-of-stock products show a "Request quote" link to `/quotes/new?product=<id>` (repeatable, at most 20; the form loads each with `GET /products/{id}` and drops unknown ones). Only ids are taken from the URL.
+- Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })` with `currency` from the quote body. Staff price inputs accept `^\d{1,7}(\.\d{1,2})?$` up to 10,000,000.00 and are converted to integer cents.
+- Dates: show `valid_until` as "valid through YYYY-MM-DD (end of day, UTC)". `po_reference`, notes, descriptions and attachment names are rendered as plain text nodes, never HTML.
+- 413 shows "The file is too large for the server."; 422 `file` shows the message under the upload control; 422 `status` shows the message and refetches; 422 `revision` shows "This quote was updated. Please review the new prices." and refetches; 429 shows the Phase 1 "try again in N seconds" message.

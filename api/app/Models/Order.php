@@ -41,6 +41,12 @@ class Order extends Model
         return $this->belongsTo(User::class, 'created_by_user_id');
     }
 
+    /** The quote this order was created from (null for cart orders). */
+    public function quote(): BelongsTo
+    {
+        return $this->belongsTo(QuoteRequest::class, 'quote_request_id');
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(OrderItem::class)->orderBy('id');
