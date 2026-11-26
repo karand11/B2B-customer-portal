@@ -83,7 +83,7 @@ Test gate
 - [x] Pest: expired quote cannot be accepted
 - [x] Pest: upload rejects wrong MIME and over 10 MB; files only downloadable by authorized users
 - [x] Vitest: dynamic quote form validates; status badges render
-- [ ] Manual: full round trip in Mailpit
+- [x] Manual: full round trip in Mailpit
 
 ## Phase 5 - Invoices and PDF download
 Build: `invoices`, `invoice_items`, gap-free invoice numbers, issue/due dates, tax, totals, statuses open/paid/overdue, create from order, Blade PDF template, `GET /invoices`, `GET /invoices/{id}/pdf`, overdue highlighting, scheduled overdue command.
@@ -134,7 +134,7 @@ Test gate
 ---
 
 ## Progress
-- [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [x] Phase 3  - [ ] Phase 4
+- [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [x] Phase 3  - [x] Phase 4
 - [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8
 
 ## Rules for every phase
