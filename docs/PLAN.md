@@ -95,7 +95,7 @@ Test gate
 - [x] Pest: other company's invoice PDF 403/404; guest 401
 - [x] Pest: overdue set by scheduled command (frozen clock)
 - [x] Vitest: invoice list statuses; download button works
-- [ ] Manual: PDF layout, special characters, page breaks on long invoice
+- [x] Manual: PDF layout, special characters, page breaks on long invoice
 
 ## Phase 6 - Staff back office
 Build: `/admin` area: product CRUD + CSV import + activate/deactivate, customers/companies and users (invite by email), all orders with status changes, quote queue, invoices, dashboard (open quotes, orders this week, overdue invoices), audit log.
@@ -135,7 +135,7 @@ Test gate
 
 ## Progress
 - [x] Phase 0  - [x] Phase 1  - [x] Phase 2  - [x] Phase 3  - [x] Phase 4
-- [ ] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8
+- [x] Phase 5  - [ ] Phase 6  - [ ] Phase 7  - [ ] Phase 8
 
 ## Rules for every phase
 - A failing test blocks the next phase.
