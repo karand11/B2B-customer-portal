@@ -17,6 +17,11 @@ use Illuminate\Validation\ValidationException;
  */
 class QuoteWorkflow
 {
+    /** Workflow action => audit action suffix, for every action that changes the status. */
+    private const AUDIT_ACTIONS = [
+        'review' => 'reviewed', 'send' => 'sent', 'reject' => 'rejected', 'reopen' => 'reopened', 'accept' => 'accepted', 'decline' => 'declined',
+    ];
+
     /**
      * @param  Closure(QuoteRequest): void|null  $effects  runs under the lock after the checks; may throw ValidationException (all rolls back)
      */
@@ -30,19 +35,35 @@ class QuoteWorkflow
                 throw ValidationException::withMessages(['status' => $this->refusal($effective, $action)]);
             }
 
-            $effects?->__invoke($locked);
+            $before = $locked->revision;
+            // An effect may return audit metadata (AcceptQuote returns the order number it created).
+            $extra = $effects?->__invoke($locked);
             $to = QuoteStatus::ACTIONS[$action][2];
 
             if ($to !== null) {
                 $from = $locked->status;
                 $locked->forceFill(['status' => $to]);
                 $this->history($locked, $from, $to, $actor, $note);
+                $this->audit($locked, $action, $from, $to, $before, $actor, is_array($extra) ? $extra : []);
             }
 
             $locked->save();
 
             return $locked;
         });
+    }
+
+    /** Status actions (not price, attach or note: pricing audits itself, the other two are not audited). `send` also records the terms that went out. */
+    private function audit(QuoteRequest $locked, string $action, QuoteStatus $from, QuoteStatus $to, int $revisionBefore, User $actor, array $metadata): void
+    {
+        $sent = $action === 'send';
+
+        AuditLog::record(
+            'quote.'.self::AUDIT_ACTIONS[$action], 'quote', $locked->quote_number, $locked->quote_number, $actor,
+            ['status' => $from->value] + ($sent ? ['revision' => $revisionBefore] : []),
+            ['status' => $to->value] + ($sent ? ['revision' => $locked->revision, 'valid_until' => $locked->valid_until?->toDateString(), 'total_cents' => $locked->total_cents] : []),
+            $metadata, $locked->company_id,
+        );
     }
 
     /** Materialise an expiry (quotes:expire). False when the quote is no longer quoted-and-past-due once locked. */

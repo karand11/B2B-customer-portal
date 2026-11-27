@@ -9,9 +9,11 @@ import CatalogError from '../catalog/CatalogError';
 import {
   NUMBER_RE,
   useCancelOrder,
+  useChangeOrderStatus,
   useOrder,
   useReorder,
   type HistoryEntry,
+  type OrderStatus,
   type OrderDetail,
 } from './api';
 import type { InvoiceStatus } from '../invoices/api';
@@ -24,12 +26,12 @@ const th = 'px-3 py-2 text-left text-sm font-semibold';
 const td = 'px-3 py-2 text-sm';
 const btn = 'rounded border border-slate-600 px-3 py-1';
 
-function OrderNotFound() {
+function OrderNotFound({ basePath }: { basePath: string }) {
   return (
     <section>
       <h1 className="mb-2 text-2xl font-semibold">Order not found</h1>
       <p className="mb-2">This order does not exist or you cannot view it.</p>
-      <Link to="/orders" className="text-blue-800 underline">
+      <Link to={`${basePath}/orders`} className="text-blue-800 underline">
         Back to orders
       </Link>
     </section>
@@ -42,7 +44,7 @@ function Timeline({ history }: { history: HistoryEntry[] }) {
       <h2 id="timeline-h" className="mb-2 text-lg font-semibold">
         Status history
       </h2>
-      <ol className="space-y-1">
+      <ol aria-labelledby="timeline-h" className="space-y-1">
         {history.map((h, i) => (
           <li key={i} className="text-sm">
             <span className="font-semibold">
@@ -56,6 +58,86 @@ function Timeline({ history }: { history: HistoryEntry[] }) {
         ))}
       </ol>
     </section>
+  );
+}
+
+const MOVE_LABELS: Record<OrderStatus, string> = {
+  pending: 'Mark as pending',
+  confirmed: 'Mark as confirmed',
+  shipped: 'Mark as shipped',
+  delivered: 'Mark as delivered',
+  cancelled: 'Cancel order',
+};
+
+/** Staff and admin: one button per allowed transition. The server decides; hiding is only UX. */
+function StatusControls({
+  order,
+  onDone,
+}: {
+  order: OrderDetail;
+  onDone: (message: string) => void;
+}) {
+  const change = useChangeOrderStatus(order.number);
+  const [target, setTarget] = useState<OrderStatus | null>(null);
+  if (order.allowed_transitions.length === 0) return null;
+  const error =
+    change.error instanceof ApiError && change.error.status === 422
+      ? (change.error.errors.status?.[0] ?? change.error.message)
+      : change.error
+        ? describeError(change.error)
+        : null;
+  const close = () => {
+    setTarget(null);
+    change.reset();
+  };
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap gap-2">
+        {order.allowed_transitions.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={btn}
+            onClick={() => setTarget(s)}
+          >
+            {MOVE_LABELS[s]}
+          </button>
+        ))}
+      </div>
+      {target && (
+        <ConfirmDialog
+          title={
+            target === 'cancelled'
+              ? 'Cancel this order?'
+              : `Mark order as ${STATUS_LABELS[target].toLowerCase()}?`
+          }
+          confirmLabel="Confirm"
+          cancelLabel="Go back"
+          tone={target === 'cancelled' ? 'danger' : 'primary'}
+          pending={change.isPending}
+          onCancel={close}
+          onConfirm={() =>
+            change.mutate(target, {
+              onSuccess: () => {
+                onDone(`Order is now ${STATUS_LABELS[target].toLowerCase()}.`);
+                close();
+              },
+            })
+          }
+        >
+          <p>
+            {target === 'cancelled'
+              ? 'The customer will see the order as cancelled. This cannot be undone.'
+              : 'The customer will see the new status.'}
+          </p>
+          {error && (
+            <p role="alert" className="mt-2 text-red-700">
+              {error}
+            </p>
+          )}
+        </ConfirmDialog>
+      )}
+    </div>
   );
 }
 
@@ -154,13 +236,19 @@ function Actions({ order }: { order: OrderDetail }) {
   );
 }
 
-export default function OrderDetailPage() {
+export default function OrderDetailPage({
+  basePath = '',
+}: {
+  basePath?: string;
+}) {
   const { number = '' } = useParams();
   const { user } = useAuth();
   const { state } = useLocation();
   const valid = NUMBER_RE.test(number);
   const q = useOrder(number, valid);
   const bannerRef = useRef<HTMLDivElement>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const [notice, setNotice] = useState('');
   const nav = state as { placed?: unknown; quoteAccepted?: unknown } | null;
   const placed = nav?.placed === true;
   const fromQuote = nav?.quoteAccepted === true;
@@ -169,9 +257,9 @@ export default function OrderDetailPage() {
     if ((placed || fromQuote) && loaded) bannerRef.current?.focus();
   }, [placed, fromQuote, loaded]);
 
-  if (!valid) return <OrderNotFound />;
+  if (!valid) return <OrderNotFound basePath={basePath} />;
   if (q.error instanceof ApiError && q.error.status === 404)
-    return <OrderNotFound />;
+    return <OrderNotFound basePath={basePath} />;
   if (q.isError && !q.data)
     return <CatalogError error={q.error} onRetry={() => void q.refetch()} />;
   const o = q.data;
@@ -198,22 +286,44 @@ export default function OrderDetailPage() {
             : `Thank you. Order ${o.number} was received and is pending confirmation.`}
         </div>
       )}
-      <Link to="/orders" className="text-blue-800 underline">
+      <Link to={`${basePath}/orders`} className="text-blue-800 underline">
         Back to orders
       </Link>
-      <h1 className="mt-2 mb-1 text-2xl font-semibold">
-        Order {o.number} <StatusBadge status={o.status} />
+      <h1
+        ref={headingRef}
+        tabIndex={-1}
+        className="mt-2 mb-1 text-2xl font-semibold outline-none"
+      >
+        Order {o.number}
       </h1>
-      <p className="text-sm">
-        Placed by {o.placed_by.name} on {formatDate(o.created_at)}
-        {!isCustomer && <> for {o.company.name}</>}
-      </p>
-      <div className="mb-4 text-sm">
+      <section aria-label="Order summary" className="mb-4 text-sm">
+        <p>
+          Status: <StatusBadge status={o.status} />
+        </p>
+        <p>
+          Placed by {o.placed_by.name} on {formatDate(o.created_at)}
+          {!isCustomer && (
+            <>
+              {' '}
+              for{' '}
+              {basePath ? (
+                <Link
+                  to={`${basePath}/companies/${o.company.id}`}
+                  className="text-blue-800 underline"
+                >
+                  {o.company.name}
+                </Link>
+              ) : (
+                o.company.name
+              )}
+            </>
+          )}
+        </p>
         <p>PO reference: {o.po_reference ?? 'none'}</p>
         {o.invoice && (
           <p>
             <Link
-              to={`/invoices/${o.invoice.id}`}
+              to={`${basePath}/invoices/${o.invoice.id}`}
               className="text-blue-800 underline"
             >
               Invoice {o.invoice.number}
@@ -228,14 +338,14 @@ export default function OrderDetailPage() {
           <p>
             From quote{' '}
             <Link
-              to={`/quotes/${o.quote_number}`}
+              to={`${basePath}/quotes/${o.quote_number}`}
               className="text-blue-800 underline"
             >
               {o.quote_number}
             </Link>
           </p>
         )}
-      </div>
+      </section>
 
       <table className="w-full border-collapse">
         <caption className="mb-1 text-left text-sm">Prices as ordered</caption>
@@ -308,8 +418,22 @@ export default function OrderDetailPage() {
       </dl>
 
       <Timeline history={o.history} />
+      <p role="status" aria-live="polite" className="mt-2 text-sm">
+        {notice}
+      </p>
       {isCustomer && <Actions order={o} />}
-      {!isCustomer && o.can_invoice && <CreateInvoiceButton order={o} />}
+      {!isCustomer && (
+        <StatusControls
+          order={o}
+          onDone={(m) => {
+            setNotice(m);
+            headingRef.current?.focus();
+          }}
+        />
+      )}
+      {!isCustomer && o.can_invoice && (
+        <CreateInvoiceButton order={o} basePath={basePath} />
+      )}
     </section>
   );
 }

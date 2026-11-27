@@ -34,6 +34,10 @@ class OrderStatusChanger
             (new OrderStatusHistory)->forceFill([
                 'order_id' => $locked->id, 'from_status' => $from, 'to_status' => $to, 'actor_user_id' => $actor->id,
             ])->save();
+            AuditLog::record(
+                'order.status_changed', 'order', $locked->order_number, $locked->order_number, $actor,
+                ['status' => $from->value], ['status' => $to->value], [], $locked->company_id,
+            );
 
             return $locked;
         });

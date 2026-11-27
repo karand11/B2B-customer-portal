@@ -1,38 +1,17 @@
-import { Link, useSearchParams } from 'react-router-dom';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
+import { Link } from 'react-router-dom';
+import { useLinkParams } from '../lib/useLinkParams';
 import { useMutation } from '@tanstack/react-query';
-import { z } from 'zod';
 import { api } from '../lib/api';
-import { FormAlert, SubmitButton, TextField } from '../components/FormParts';
-
-const schema = z
-  .object({
-    password: z
-      .string()
-      .min(10, 'Password must be at least 10 characters')
-      .max(255, 'Password must be at most 255 characters'),
-    password_confirmation: z.string().min(1, 'Please confirm your password'),
-  })
-  .refine((v) => v.password === v.password_confirmation, {
-    path: ['password_confirmation'],
-    message: 'Passwords do not match',
-  });
-type Values = z.infer<typeof schema>;
+import NewPasswordForm, {
+  type NewPasswordValues,
+} from '../components/NewPasswordForm';
 
 const INVALID = 'This password reset link is invalid or has expired.';
 
 export default function ResetPasswordPage() {
-  const [params] = useSearchParams();
-  const token = params.get('token');
-  const email = params.get('email');
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-  } = useForm<Values>({ resolver: zodResolver(schema) });
+  const { token, email } = useLinkParams();
   const mutation = useMutation({
-    mutationFn: (v: Values) =>
+    mutationFn: (v: NewPasswordValues) =>
       api.post('/api/v1/auth/reset-password', { token, email, ...v }),
   });
 
@@ -65,30 +44,13 @@ export default function ResetPasswordPage() {
   return (
     <section>
       <h1 className="mb-4 text-2xl font-semibold">Reset password</h1>
-      <form onSubmit={handleSubmit((v) => mutation.mutate(v))} noValidate>
-        <TextField
-          id="password"
-          label="New password"
-          type="password"
-          autoComplete="new-password"
-          error={errors.password?.message}
-          {...register('password')}
-        />
-        <TextField
-          id="password_confirmation"
-          label="Confirm new password"
-          type="password"
-          autoComplete="new-password"
-          error={errors.password_confirmation?.message}
-          {...register('password_confirmation')}
-        />
-        <FormAlert error={mutation.error} />
-        <SubmitButton
-          pending={mutation.isPending}
-          idle="Reset password"
-          busy="Resetting..."
-        />
-      </form>
+      <NewPasswordForm
+        onSubmit={(v) => mutation.mutate(v)}
+        pending={mutation.isPending}
+        error={mutation.error}
+        idle="Reset password"
+        busy="Resetting..."
+      />
     </section>
   );
 }

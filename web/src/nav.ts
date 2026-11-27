@@ -10,10 +10,21 @@ export interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { label: 'Home', to: '/', roles: ['customer', 'staff', 'admin'] },
   { label: 'Catalog', to: '/catalog', roles: ['customer', 'staff', 'admin'] },
-  { label: 'Orders', to: '/orders', roles: ['customer', 'staff', 'admin'] },
-  { label: 'Quotes', to: '/quotes', roles: ['customer', 'staff', 'admin'] },
-  { label: 'Invoices', to: '/invoices', roles: ['customer', 'staff', 'admin'] },
+  { label: 'Orders', to: '/orders', roles: ['customer'] },
+  { label: 'Quotes', to: '/quotes', roles: ['customer'] },
+  { label: 'Invoices', to: '/invoices', roles: ['customer'] },
   { label: 'Cart', to: '/cart', roles: ['customer'] },
-  { label: 'Staff area', to: '/staff', roles: ['staff', 'admin'] },
-  { label: 'Admin area', to: '/admin', roles: ['admin'] },
+  { label: 'Back office', to: '/admin', roles: ['staff', 'admin'] },
+];
+
+// Back-office navigation. Users and Audit log are admin-only (the API enforces it).
+export const ADMIN_NAV_ITEMS: NavItem[] = [
+  { label: 'Dashboard', to: '/admin', roles: ['staff', 'admin'] },
+  { label: 'Orders', to: '/admin/orders', roles: ['staff', 'admin'] },
+  { label: 'Quotes', to: '/admin/quotes', roles: ['staff', 'admin'] },
+  { label: 'Invoices', to: '/admin/invoices', roles: ['staff', 'admin'] },
+  { label: 'Products', to: '/admin/products', roles: ['staff', 'admin'] },
+  { label: 'Companies', to: '/admin/companies', roles: ['staff', 'admin'] },
+  { label: 'Users', to: '/admin/users', roles: ['admin'] },
+  { label: 'Audit log', to: '/admin/audit-log', roles: ['admin'] },
 ];

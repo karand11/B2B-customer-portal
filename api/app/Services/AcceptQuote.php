@@ -56,6 +56,9 @@ class AcceptQuote
             (new OrderStatusHistory)->forceFill([
                 'order_id' => $order->id, 'from_status' => null, 'to_status' => OrderStatus::Pending, 'actor_user_id' => $user->id,
             ])->save();
+
+            // Becomes the metadata of the quote.accepted audit row (written by the workflow, once).
+            return ['order_number' => $order->order_number];
         });
     }
 }

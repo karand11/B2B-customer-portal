@@ -8,6 +8,11 @@ import Pagination from '../catalog/Pagination';
 import { useUrlQuery } from '../catalog/useCatalogQuery';
 import { useQuotes } from './api';
 import { priceOrAwaiting } from './money';
+import {
+  CompanyFilter,
+  WithinDays,
+  useAdminDefault,
+} from '../admin/ListFilters';
 import StatusBadge from './StatusBadge';
 import {
   ATTENTION,
@@ -27,11 +32,16 @@ const td = 'px-3 py-2 text-sm';
 const input = 'rounded border border-slate-500 px-2 py-1';
 const btn = 'rounded border border-slate-600 px-3 py-1';
 
-export default function QuotesPage() {
+/** `basePath` is '/admin' when mounted in the back office, so links stay inside it. */
+export default function QuotesPage({ basePath = '' }: { basePath?: string }) {
   const { user } = useAuth();
   const { query, update } = useUrlQuery<QuoteQuery>(parseQuery, toSearch);
   const rangeError = dateRangeError(query);
-  const quotes = useQuotes(query, !rangeError);
+  const redirecting = useAdminDefault(
+    basePath,
+    '?status=submitted,in_review&sort=created_at',
+  );
+  const quotes = useQuotes(query, !rangeError && !redirecting);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isStaff = user?.role !== 'customer';
   const list = quotes.data;
@@ -135,14 +145,27 @@ export default function QuotesPage() {
                 <tr key={q.number} className="border-b border-slate-300">
                   <td className={td}>
                     <Link
-                      to={`/quotes/${q.number}`}
+                      to={`${basePath}/quotes/${q.number}`}
                       className="text-blue-800 underline"
                     >
                       {q.number}
                     </Link>
                   </td>
                   <td className={td}>{q.po_reference ?? '—'}</td>
-                  {isStaff && <td className={td}>{q.company.name}</td>}
+                  {isStaff && (
+                    <td className={td}>
+                      {basePath ? (
+                        <Link
+                          to={`${basePath}/companies/${q.company.id}`}
+                          className="text-blue-800 underline"
+                        >
+                          {q.company.name}
+                        </Link>
+                      ) : (
+                        q.company.name
+                      )}
+                    </td>
+                  )}
                   <td className={td}>{formatDate(q.created_at)}</td>
                   <td className={td}>
                     <StatusBadge status={q.status} />
@@ -242,6 +265,22 @@ export default function QuotesPage() {
           value={query.q}
           onCommit={(q) => update({ q }, true)}
         />
+        {basePath && (
+          <>
+            <CompanyFilter
+              value={query.company_id}
+              onChange={(company_id) => update({ company_id })}
+            />
+            <WithinDays
+              label="Expiring within"
+              value={query.expiring_within_days}
+              options={[7, 14, 30]}
+              onChange={(expiring_within_days) =>
+                update({ expiring_within_days })
+              }
+            />
+          </>
+        )}
         <div className="mb-4">
           <label
             htmlFor="quotes-sort"

@@ -155,7 +155,7 @@ Rules: exactly these keys, no others (never `password`, `remember_token`, `compa
   ```
 - Side effect, only when the user exists (and broker per-user throttle of 60 s is not active): one email with link
   `{APP_URL_WEB}/reset-password?token=<token>&email=<urlencoded email>` (for local dev `http://localhost:5173/reset-password?token=...&email=alice%40northwind.test`). The link points at the SPA, never at the API. Token is valid 60 minutes.
-- Unknown emails must not return noticeably faster than known ones: use Laravel's `Password::sendResetLink` and ignore its status; do not add an existence check with an early return. The reset notification is queued (`ShouldQueue`, database queue) so SMTP time never shows in the response time. Local dev needs `php artisan queue:listen` running (part of `composer dev`); tests use the sync queue.
+- Unknown emails must not return noticeably faster than known ones: use Laravel's `Password::sendResetLink` and ignore its status; do not add an existence check with an early return. The reset notification is queued (`ShouldQueue`, database queue) so SMTP time never shows in the response time, and it is `ShouldBeEncrypted` (like the Phase 6 invitation mail): the `jobs` payload contains no token (Phase 6 change). Local dev needs `php artisan queue:listen` running (part of `composer dev`); tests use the sync queue.
 - Errors: 422 only for missing/malformed email (standard shape). 419 missing CSRF. 429 rate limited (see Rate limits). 401, 403, 404: not applicable.
 
 ### POST /api/v1/auth/reset-password
@@ -171,7 +171,7 @@ Rules: exactly these keys, no others (never `password`, `remember_token`, `compa
   }
   ```
   Rules: `token` required string; `email` required valid email; `password` required, string, min 10, max 255, must equal `password_confirmation`.
-- Response 200: `{ "message": "Your password has been reset." }`. The user is NOT logged in by this call; SPA sends them to /login. The token is deleted (single use). Other tokens for that email are gone too. The user's other sessions are invalidated (Sanctum `AuthenticateSession`): an old session cookie from before the reset gets 401 on `GET /api/v1/me`.
+- Response 200: `{ "message": "Your password has been reset." }`. The user is NOT logged in by this call; SPA sends them to /login. The token is deleted (single use). Other tokens for that email are gone too. Single use holds UNDER CONCURRENCY (Phase 6 change): the token check, the delete and the password change run in one transaction under a row lock on the user (`App\Services\SingleUseToken::consume()` inside the broker callback), so parallel requests with the same token give exactly one 200 and the identical generic 422 below for all the others. Every session of that user is invalidated: the reset bumps `users.session_epoch` in the same save as the password, so an old session cookie from before the reset gets 401 on its next request (including `GET /api/v1/me`); the user can log in again with the new password. Phase 6 replaced the Phase 1 mechanism (Sanctum `AuthenticateSession`) with the epoch.
 - Errors:
   - 422 validation: standard shape (e.g. `errors.password`: "The password field must be at least 10 characters.", "The password field confirmation does not match.").
   - 422 invalid, expired (older than 60 minutes), already used, or unknown email, all identical:
@@ -1304,3 +1304,341 @@ Small points the contract left open; all are tested and binding:
 - Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })` with `currency` from the invoice body; the VAT rate is shown as `vat_rate_bp / 100` percent. Dates are shown as the `YYYY-MM-DD` strings from the API and never parsed with `new Date(string)` (timezone shift).
 - Download: `fetch` with `credentials: 'same-origin'` and `Accept: application/pdf`, then a blob and a temporary `<a download>`; the saved name is the `Content-Disposition` filename if it matches `^INV-\d{4}-\d{6,9}\.pdf$`, else `<number>.pdf`. A non-`application/pdf` response is an error. 401 goes to the login redirect; 404 shows "Invoice not found"; 429 shows the Phase 1 "try again in N seconds" message; the button is disabled while pending.
 - Staff dialogs: Create invoice (order detail, shown when `can_invoice`; optional `due_date`), Mark paid (`paid_on`, max today) and Void (required `reason`, warning that the number stays reserved). Requests contain only those fields. 422 `order`, `company`, `invoice`, `status`, `due_date`, `paid_on`, `reason` messages are shown in the dialog; `status` and `order` also refetch. All invoice text (names, addresses, PO reference, reason) is rendered as text nodes, never HTML.
+
+---
+
+## Phase 6 - Staff back office (`/admin`)
+
+Decisions, schema, services, frontend, Playwright design, seeders and test plan: `docs/phase-6-design.md`. This section is the HTTP contract. All Phase 1 to 5 conventions apply unchanged (cookie auth, CSRF header on writes, `Accept: application/json`, exact 404 body, `TrimStrings` and NUL rules, `{ "data": ... }` wrapping, six-key `meta`, 429 body and `Retry-After`, global `QueryException` handling, role middleware before limiters) except where "Changes to earlier contracts" below says otherwise.
+
+### Phase 6 rules (apply to every endpoint below)
+
+- Auth: `auth:sanctum` plus the new `active` middleware (below). Guests get 401 on every endpoint.
+- Two role tiers, enforced by role middleware BEFORE any limiter, binding, validation or lookup (a wrong role is 403 for every id, existing or not):
+
+  | Tier | Middleware | Endpoints |
+  | --- | --- | --- |
+  | S (staff or admin) | `role:staff\|admin` | dashboard, products, imports, companies (read and billing edit), the orders/quotes/invoices endpoints that already exist |
+  | A (admin only) | `role:admin` | users, invitations, company create and rename, audit log, `GET /admin/ping` |
+
+  Customers get 403 on every `/admin` endpoint, staff get 403 on every tier-A endpoint.
+- Existing staff endpoints are REUSED, not wrapped: order status (`PATCH /orders/{number}/status`), quote actions, invoice create, mark-paid and void keep their Phase 3 to 5 paths and bodies. The back office calls them directly. There is no `/admin/orders`, `/admin/quotes` or `/admin/invoices` API (the SPA has pages at those URLs, see Frontend).
+- Company scoping: `/admin` endpoints are cross-company by design and reachable only by `staff` and `admin`, who have `company_id = null` and see every company. There is no customer path to any of them. Where a `company_id` appears (company filters, user assignment) it is an EXPLICIT admin or staff input, validated to exist; it is never taken from the session. Customer-facing endpoints are unchanged and still scope by the session user's `company_id`.
+- Identifiers: `/admin` URLs use numeric ids for products, companies and users (route patterns `product`, `company`, `user` = `[0-9]{1,18}`, enforced by routing before any middleware: anything else is a plain 404) and a random lowercase UUID for imports (route pattern `import` = the UUID pattern of `attachment`). This is an accepted exception to the earlier "no numeric ids in URLs" rule: that rule protects customers from enumeration, and no customer can reach these routes. Customer-facing resources never gain a numeric id.
+- Check order for `/admin` routes: route pattern (404) then authentication (401) then `active` (401) then role (403) then limiters (429) then path-model lookup (404) then body validation (422) then state and business rules under the row lock (409 or 422). Departure from Phases 3 to 5 (validation before lookup): on `/admin` the lookup comes first because implicit route-model binding is used and there is no foreign-resource oracle for staff and admin. Import tokens are looked up manually and scoped to the uploader (foreign = 404).
+- Mass assignment: every endpoint reads only the fields documented for it. `role`, `company_id`, `active`, `session_epoch`, `invited_at`, `password`, `email_verified_at`, `version` (outside the endpoints that document it), prices outside the product endpoints, `status`, `number`, `created_at` and any other key are ignored when sent (not 422), EXCEPT the explicit admin actions that document them (`role` and `company_id` on `PUT /admin/users/{user}/assignment` and on invite, `company_id` on tier-A user and company endpoints). Models are never filled from `request()->all()`; services call `forceFill` with explicit server-built arrays.
+- Optimistic concurrency (products and companies): every row has an integer `version` (starts at 1, incremented by a database trigger on EVERY update). `PUT` bodies must echo the `version` the client loaded. A stale version is `409`:
+  ```json
+  { "message": "This record was changed by someone else. Reload it and try again.", "errors": { "version": ["This record was changed by someone else. Reload it and try again."] } }
+  ```
+  A missing or non-integer `version` is 422 `version`. The check happens under a row lock after validation; the 409 never overwrites anything.
+- Audit: every state change listed in "Audit log" below writes exactly one `audit_log` row in the SAME database transaction as the change, so a rolled-back change leaves no row. Customer-visible history tables are unchanged and remain the customer timeline.
+- Input shape: every string field of every admin write endpoint answers an array, object, nested array, number, boolean or `null` (where the field is not nullable) with `422` keyed by that field, never `400` and never `500`. All requests read their input through `bodyInput()`, never through `$this->request->get()` (which throws `BadRequestException` on array values). On the apply endpoint the route binding (`{import}` owned by the caller) answers 404 BEFORE any validation.
+- Text rules: product, company and user text fields reject `Cc` and `Cf` control/format characters (NUL, ESC, U+200B, bidi marks), invalid UTF-8 and interior NUL (422). `description` and `billing_address` allow LF (CRLF is normalised to LF) and tab only. The importer's formula-prefix rule (value must not start with `=`, `+`, `-`, `@`, tab or CR) applies to product `name` and `description` on create, update and import alike (one shared rule class).
+- Money: integer cents, `0..1,000,000,000` per unit (Phase 2 cap). Dashboard sums can reach 1.5e15, exact as JSON integers below `Number.MAX_SAFE_INTEGER`.
+- Dates: timestamps ISO 8601 UTC with `Z`; plain dates `YYYY-MM-DD` (UTC).
+- Rate limits (all keyed by user id; the role 403 always comes first):
+
+  | Limiter | Applies to | Limit |
+  | --- | --- | --- |
+  | `api` (changed) | every endpoint | 60 per 60 s for customers and guests (unchanged), 240 per 60 s for staff and admin (one shared bucket per user). The limiter reads the role stored in the session at login (not the role middleware, which does not run on catalog or `/me` routes); a role change bumps the session epoch, so the stored role cannot go stale |
+  | `admin-writes` | every `POST`, `PUT`, `PATCH`, `DELETE` under `/admin` | 60 per 60 s, every attempt counts including 422 |
+  | `admin-import` | `POST /admin/products/imports` and `.../apply` | 5 per 60 s and `admin-import-hourly` 20 per 3600 s, every attempt counts |
+  | `admin-invites` | `POST /admin/users` and `POST /admin/users/{user}/invitation` | 20 per 3600 s |
+  | `password-reset` (existing) | `POST /auth/accept-invitation` | 5 per 60 s per client IP |
+
+- Lists: `page` integer 1 to 10000 (default 1), `per_page` integer 1 to 100 (default 25, 101 is 422), `sort` from a whitelist (default stated per endpoint), every ordering ends with the primary key ascending as tie-break, `q` trimmed max 64 with `%`, `_`, `\` literal. CSV parameters, array syntax, interior NUL and invalid UTF-8 follow Phase 2 and 3 (422 on the parameter name, never `status.0`). Response: `{ "data": [...], "meta": { six keys exactly as /orders } }`, page beyond last is 200 with `data: []`. Unknown parameters are ignored.
+- Query counts (excluding the session user query): dashboard 4, product list 3, company list 3, user list 4, audit list 4, company detail at most 8, user detail 3. Constant in the number of rows (no N+1).
+- 500 is never returned for bad input. A unique-constraint race on `part_number_search` is mapped to 422 `part_number` by the service.
+
+### The `active` middleware and user states (new, applies to EVERY `auth:sanctum` route)
+
+- `users` gain `active` (boolean), `session_epoch` (integer), `invited_at`, `invitation_accepted_at`, `invited_by_user_id`. States: `pending` (`invited_at` set, `invitation_accepted_at` null, `active` true), `inactive` (`active` false, includes a revoked invitation), `active` (everything else). Users created before Phase 6, by seeders and by factories are `active`.
+- On every authenticated request the `active` middleware (after `auth:sanctum`, before role) answers `401 {"message":"Unauthenticated."}` and logs the session out when the user is `inactive` or `pending`, or when the session's stored `session_epoch` differs from the user's current `users.session_epoch` (a session that exists but has no stored value counts as different, so sessions created before this release die once at deploy). A request that has NO session at all skips the epoch comparison and only the active/pending check applies. The epoch is stored in the session at login and bumped by deactivation, reactivation, role or company assignment, accepting an invitation and a completed password reset (self-service `POST /auth/reset-password`, or a reset the admin triggered; the bump is in the same save as the password, so every old session dies on its next request and the user logs in again with the new password). Known limit: the epoch comparison is skipped when the request has no session (see above); if personal access tokens are ever added, the check must fail closed for requests without a session (Phase 7 follow-up). A deactivated user's open sessions therefore die on their next request, with any session driver.
+- `POST /auth/logout` is `auth:sanctum` only (NO `active` middleware), so a session that is stale (deactivated user, old epoch) can still log out and gets 204 instead of 401. The route-audit matrix labels it `session`.
+- Login: a user who is not `active` (deactivated or pending) gets exactly the wrong-credentials 422, after the same password hash check, and the failure counts toward the login limiters. `POST /auth/forgot-password` sends nothing for them (same 200 body). Pending and deactivated users cannot complete `reset-password` (their tokens are deleted on deactivation and the notification is not sent).
+
+### AdminProductResource
+
+```json
+{
+  "id": 17,
+  "part_number": "6205-2RS",
+  "name": "Deep groove ball bearing 6205-2RS 25x52x15",
+  "description": null,
+  "brand": "SKF",
+  "category": { "id": 1, "slug": "deep-groove-ball", "name": "Deep groove ball bearings" },
+  "inner_diameter_mm": 25,
+  "outer_diameter_mm": 52,
+  "width_mm": 15,
+  "material": "Chrome steel",
+  "seal_type": "2rs",
+  "price_cents": 1250,
+  "price_on_request": false,
+  "stock_status": "in_stock",
+  "active": true,
+  "version": 3,
+  "created_at": "2026-11-26T10:00:00Z",
+  "updated_at": "2026-11-27T09:00:00Z"
+}
+```
+
+Exactly these keys. The list item omits `description`. Number rules as Phase 2 (`*_mm` JSON numbers, `price_cents` integer or null).
+
+### GET /api/v1/admin/products
+- Auth: tier S. Scope: all products, active and inactive, for staff and admin.
+- Query: `q` (normalised part-number substring, Phase 2 rules, a `q` that normalises to empty is an empty list), `active` (`true` or `false`; absent = both), `category` (CSV of slugs, unknown slug 422), `brand` (CSV, exact), `stock_status` (CSV enum), `sort` in `part_number`, `name`, `brand`, `price`, `updated_at` and their `-` variants (default `part_number`; `price` puts price-on-request last in both directions), `page`, `per_page`.
+- Response 200: list of AdminProductResource (no `description`) plus `meta`.
+- Errors: 401, 403 customer, 422 (parameter names), 429.
+
+### POST /api/v1/admin/products
+- Auth: tier S. Limiters: `api`, `admin-writes`.
+- Body: `category_id` (required integer, must exist), `part_number` (required; trimmed, uppercased; 1 to 64 characters matching `^[A-Za-z0-9][A-Za-z0-9 ._/-]*$`; its normalised form must be non-empty and not used by any product, active or inactive), `name` (required, 1 to 255), `description` (optional string or null, max 5000), `brand` and `material` (required, 1 to 64, `^[\p{L}\p{N}][\p{L}\p{N} .&/+-]*$`), `inner_diameter_mm`, `outer_diameter_mm`, `width_mm` (required, JSON number or numeric string, max 2 decimals, above 0 and at most 5000; outer strictly greater than inner), `seal_type` (`open|2rs|zz`), `stock_status` (`in_stock|low_stock|out_of_stock|on_order`), `price_on_request` (required boolean), `price_cents` (integer 0 to 1,000,000,000; REQUIRED when `price_on_request` is false, must be `null` or absent when true), `active` (optional boolean, default true).
+- Behaviour (one transaction): insert, audit `product.created`; after commit flush `catalog:filters` and `catalog:categories`.
+- Response 201: `{ "data": AdminProductResource }`.
+- Errors: 401, 403, 419, 422 (field names; `part_number` also for "This part number is already in use." including the unique-index race), 429.
+
+### GET /api/v1/admin/products/{product}
+- Auth: tier S. Response 200 `{ "data": AdminProductResource }` (inactive included). Errors: 401, 403, 404, 429.
+
+### PUT /api/v1/admin/products/{product}
+- Auth: tier S. Limiters `api`, `admin-writes`. Full replacement: the same fields and rules as POST (without `active`) plus required `version`. `active` is never accepted here (use activate/deactivate); `price_cents` and `price_on_request` follow the same XOR rule.
+- Behaviour (one transaction): lock the row, compare `version` (409 on mismatch), write only if something changed, audit `product.updated` with before/after of the changed allowlisted fields (no row and no version bump when nothing changed, still 200), flush the catalog cache after commit. Snapshots on existing orders, quotes and invoices are never touched. Changing `part_number` is allowed (old documents keep the old number).
+- Response 200: `{ "data": AdminProductResource }` with the new `version`.
+- Errors: 401, 403, 404, 409, 422 (including `version`), 429.
+
+### POST /api/v1/admin/products/{product}/activate and /deactivate
+- Auth: tier S. Limiters `api`, `admin-writes`. No body (ignored).
+- Behaviour: sets `active` true or false under the row lock; idempotent (already in that state is 200, no audit row, no version bump); audit `product.activated` or `product.deactivated`; cache flush after commit. A deactivated product disappears from every catalog endpoint at once (list, detail 404, filters, categories counts) and from cart add and quote request creation (422 "The selected product is not available."). Existing cart lines stay and show `unavailable_reason: "inactive"`; checkout refuses them; reorder skips them; old orders, quotes and invoices are unchanged. There is NO delete endpoint for products.
+- Response 200: `{ "data": AdminProductResource }`. Errors: 401, 403, 404, 429.
+
+### POST /api/v1/admin/products/imports (CSV preview, step 1)
+- Auth: tier S. Limiters `api`, `admin-writes`, `admin-import`, `admin-import-hourly`.
+- Request: `multipart/form-data`, one part `file` (CSRF header required, no manual `Content-Type`). Rules: extension `.csv`, at most 5 MiB (`admin.imports.max_bytes`), sniffed type `text/csv`, `text/plain` or `application/csv`, valid UTF-8 (BOM allowed) without NUL, at most 5,000 data rows (`admin.imports.max_rows`; larger files use `php artisan products:import`). Column spec, per-row validation and messages are exactly the Phase 2 importer (`docs/phase-2-design.md` section 6), implemented by one shared `ProductImporter` service used by the command and this endpoint.
+- Behaviour: validates and classifies every row with NO product write, stores the file privately (disk `imports`, random name, outside the public root, never served), inserts a `product_imports` row, returns the preview. The preview expires after 1 hour.
+- Response 201:
+  ```json
+  {
+    "data": {
+      "id": "3f2b8c1e-4d5a-4b7e-9c10-2a6f5e8d7b90",
+      "file_name": "catalog.csv",
+      "size_bytes": 123456,
+      "status": "previewed",
+      "expires_at": "2026-11-27T11:15:00Z",
+      "rows_read": 200,
+      "would_create": 150,
+      "would_update": 47,
+      "bad_rows": 3,
+      "errors": [ { "line": 14, "messages": ["outer_diameter_mm: must be greater than inner_diameter_mm"] } ],
+      "errors_truncated": false,
+      "warnings": ["unknown column \"foo\" ignored"]
+    }
+  }
+  ```
+  `errors` lists at most 100 bad rows in file order (`line` is the 1-based physical line of the record start, header = line 1); `errors_truncated` is true when `bad_rows` is above 100. `file_name` is the sanitised display name (never used as a path).
+- Errors: 401, 403, 413 (body above `post_max_size`), 419, 422 `file` (missing, not a file, wrong extension or content, too large, not UTF-8, header problems such as a missing required column, empty, more than the row limit), 429.
+
+### POST /api/v1/admin/products/imports/{import}/apply (CSV apply, step 2)
+- Auth: tier S. Same limiters as the preview. Scope: the import must belong to the calling user (another user's token, an unknown one and a malformed one are all 404; the route binding answers 404 BEFORE body validation).
+- Body: optional `{ "skip_invalid": true }` (boolean, default false). When the preview had `bad_rows > 0` and `skip_invalid` is not true: 422 `skip_invalid`.
+- Behaviour (one transaction, under a row lock on the import): status must be `previewed` and not expired (422 `import` "This import was already applied." / "This preview has expired. Upload the file again."), the stored file must still match its SHA-256 (else 422 `import`), the file is parsed again and the valid rows are upserted by normalised part number (idempotent, same rules as the command: nothing is ever deleted; `active` in the file is honoured ONLY when the CSV header has an `active` column: a file without that column never changes `active` of existing products, and inserts default to `active = true`), the import row becomes `applied`, audit `product.imported` with counts. After commit: flush the catalog cache, delete the stored file. A double click or a replay is therefore applied once: the second request is 422 `import`.
+- Response 200: `{ "data": { "id": "...", "status": "applied", "rows_read": 200, "created": 150, "updated": 47, "bad_rows": 3 } }` (actual counts at apply time).
+- Errors: 401, 403, 404, 419, 422 (`import`, `skip_invalid`), 429.
+
+### CompanyAdminResource
+
+```json
+{
+  "id": 1,
+  "name": "Northwind Machinery Ltd",
+  "tax_id": "NW-TAX-0001",
+  "has_billing_address": true,
+  "version": 2,
+  "users_count": 2,
+  "open_orders_count": 3,
+  "open_quotes_count": 1,
+  "unpaid_invoices_count": 2,
+  "created_at": "2026-11-25T10:00:00Z"
+}
+```
+Definitions (counts are live, effective statuses, one correlated subquery each): `open_orders_count` = orders `pending`, `confirmed` or `shipped`; `open_quotes_count` = quotes `submitted`, `in_review`, or `quoted` with `valid_until` today or later (UTC); `unpaid_invoices_count` = invoices that are effectively `open` or `overdue`; `users_count` = all users of the company (any state). The detail resource adds `billing_address` (string with LF line breaks, or null), `users` (at most 100: `id`, `name`, `email`, `role`, `status`) and `recent`: `orders` (5 newest: `number`, `status`, `total_cents`, `currency`, `created_at`), `quotes` (5 newest: `number`, `status` effective, `created_at`), `invoices` (5 newest: `id`, `number`, `status` effective, `total_cents`, `currency`, `due_date`). The staff view of quote status and amounts follows the existing staff visibility (no customer masking applies).
+
+### GET /api/v1/admin/companies
+- Auth: tier S. Query: `q` (name substring, case-insensitive), `sort` in `name`, `created_at` and `-` variants (default `name`), `page`, `per_page`. Response: list of CompanyAdminResource without `users` and `recent`, plus `meta`. Errors: 401, 403, 422, 429.
+
+### GET /api/v1/admin/companies/{company}
+- Auth: tier S. Response 200 `{ "data": CompanyAdminResource (detail form) }`. Errors: 401, 403, 404, 429.
+
+### POST /api/v1/admin/companies
+- Auth: tier A (admin only). Limiters `api`, `admin-writes`. Body: `name` (required, 1 to 255), `billing_address` (optional), `tax_id` (optional), rules below. Audit `company.created`. Response 201 detail form. Errors: 401, 403 (staff too), 419, 422, 429. Names are not unique (two companies may share a name; the id disambiguates).
+
+### PUT /api/v1/admin/companies/{company}
+- Auth: tier A. Body: `name`, `billing_address`, `tax_id`, `version` (all keys required, null allowed for the two optional ones). Audit `company.updated` (name and tax_id before/after, billing address as a changed flag). 409 on stale `version`. Response 200 detail form. Errors: 401, 403, 404, 409, 419, 422, 429.
+
+### PUT /api/v1/admin/companies/{company}/billing
+- Auth: tier S (staff may fix the data needed to issue an invoice, but cannot rename or create companies). Body: `billing_address` (string or null), `tax_id` (string or null), `version`. Same audit and 409 behaviour. Response 200 detail form. Errors as above.
+- Rules: `billing_address`: CRLF becomes LF, each line trimmed, blank lines dropped, at most 6 lines, each at most 80 characters, at most 500 characters in total (documentation only: 6 lines of 80 plus 5 line breaks is at most 485 characters, so this limit is unreachable and has no separate error), no control or format characters; empty becomes `null`. `tax_id`: trimmed, empty becomes `null`, at most 32 characters, `^[A-Za-z0-9][A-Za-z0-9 ./-]*$`. Editing these NEVER changes an issued invoice (invoices hold their own `buyer` snapshot). A company cannot be deleted or deactivated.
+
+### UserAdminResource
+
+```json
+{
+  "id": 7,
+  "name": "Dave Dealer",
+  "email": "dave@northwind.test",
+  "role": "customer",
+  "company": { "id": 1, "name": "Northwind Machinery Ltd" },
+  "status": "active",
+  "invited_at": null,
+  "invitation_accepted_at": null,
+  "created_at": "2026-11-25T10:00:00Z",
+  "allowed_actions": ["edit", "assign", "deactivate", "reset_password"]
+}
+```
+Exactly these keys (never `password`, `remember_token`, `session_epoch`, tokens). `role` is `customer|staff|admin`; `company` is null for staff and admin; `status` is `pending|active|inactive`. `allowed_actions` is computed for the calling admin and the row: `edit` always; for the admin's own row only `edit`; otherwise `assign` always, `deactivate` and `reset_password` when `active`, `reactivate` when `inactive` and the invitation was accepted (or the user predates invitations), `resend_invitation` when the user was invited and has not accepted (pending or revoked), `revoke_invitation` when `pending`. The list does not pre-check the last-admin rule (it would be a query per row); the server refuses it with 422.
+
+### GET /api/v1/admin/users
+- Auth: tier A. Query: `q` (name or email substring, case-insensitive), `role` (CSV of roles), `status` (CSV of `pending,active,inactive`), `company_id` (integer), `sort` in `name`, `email`, `created_at` and `-` variants (default `name`), `page`, `per_page`. Response: list of UserAdminResource plus `meta`. Errors: 401, 403 (customer and staff), 422, 429.
+
+### GET /api/v1/admin/users/{user}
+- Auth: tier A. Response 200 `{ "data": UserAdminResource }`. Errors: 401, 403, 404, 429.
+
+### POST /api/v1/admin/users (invite)
+- Auth: tier A. Limiters `api`, `admin-writes`, `admin-invites`.
+- Body: `name` (required, 1 to 255), `email` (required, valid, max 255, trimmed and lowercased; unique case-insensitively among ALL users), `role` (required, `customer|staff|admin`), `company_id` (integer, REQUIRED and must exist when `role` is `customer`; must be absent or `null` for `staff` and `admin`, otherwise 422 `company_id`).
+- Behaviour (one transaction): create the user through `User::provision`-style code (forceFill, never mass assignment) with a random unusable password, `active` true, `invited_at` now, `invited_by_user_id` = the admin; create a single-use invitation token (see below); audit `user.invited`. After commit one queued, encrypted email `UserInvitationMail` (`ShouldBeEncrypted`, supported on queued mailables in the installed Laravel 12.74.0; a test confirms the `jobs` payload contains no `token=`; the mail text does NOT include the invited user's name, to rule out markdown injection) with the link `{APP_URL_WEB}/accept-invitation?token=<token>&email=<urlencoded email>` (never built from the request Host). A mail failure never fails the request.
+- Response 201: `{ "data": UserAdminResource, "meta": { "email_queued": true } }` (`false` when queueing threw; the admin then uses resend).
+- Errors: 401, 403, 419, 422 (`name`, `email` "This email is already in use.", `role`, `company_id`), 429.
+
+### PATCH /api/v1/admin/users/{user}
+- Auth: tier A. Body `{ "name": "..." }` only (1 to 255, text rules). Email is IMMUTABLE after creation (to fix a typo: revoke the invitation and invite the correct address). Audit `user.updated`. Response 200 UserAdminResource. Errors: 401, 403, 404, 419, 422, 429.
+
+### PUT /api/v1/admin/users/{user}/assignment
+- Auth: tier A. Body `{ "role": "staff", "company_id": null }` (both keys required; same role/company invariants as invite).
+- Behaviour (one transaction; the last-admin lock is described below): refuses the admin's own row (422 `user` "You cannot change your own role or company."), refuses removing the admin role from the LAST active admin (422 `role` "At least one active administrator is required."). Both refusals come from the service (`UserPolicy` does not refuse the admin's own row). The last-admin rule is unreachable over HTTP for a single acting admin (the actor is never the target, so at least one other active admin exists); it is tested at service level, and the race between two admins is tested with real parallel processes.
+- Last-admin lock (shared by `assign` and `deactivate`, the ONLY two operations that can reduce the number of active admins; reactivate, invitation accept, invite, revoke, resend, rename, password reset and company changes cannot): inside the transaction, first take ONE transaction-level advisory lock, `pg_advisory_xact_lock(UserAdmin::ADMIN_SET_LOCK)` with the constant `UserAdmin::ADMIN_SET_LOCK = 7206001`, then re-read the admin set in a SEPARATE statement (so the read sees everything committed before the lock was granted), then lock the target user row (`lockForUpdate`). Guarantee: under concurrency a role change or deactivation can never leave zero active admins; of two simultaneous mutual demotions or deactivations (A acts on B while B acts on A) exactly one succeeds and the other gets the 422. Applies role (single role, `syncRoles`) and `company_id`, bumps `session_epoch` (the user must sign in again), deletes the user's cart lines (carts belong to customers), audit `user.assignment_changed` with before/after `role` and `company_id`. A no-op (same role and company) is 200 without audit or epoch bump. Existing orders, quotes and invoices keep their company.
+- Response 200 UserAdminResource. Errors: 401, 403, 404, 419, 422 (`role`, `company_id`, `user`), 429.
+
+### POST /api/v1/admin/users/{user}/deactivate and /reactivate
+- Auth: tier A. No body. Deactivate: sets `active` false, bumps `session_epoch` (all sessions die on the next request), deletes the user's password-reset and invitation tokens, audit `user.deactivated`. Refused for the admin's own row (422 `user`, from the service, not the policy), for the LAST active admin (422 `user`; same advisory lock and guarantee as in assignment above, so it also holds under concurrency), and for a `pending` user (use revoke). Reactivate: sets `active` true and bumps the epoch, audit `user.reactivated`; refused (422 `user`) for a user who was invited and never accepted (send a new invitation instead). Both are idempotent when already in the target state (200, no audit row).
+- Response 200 UserAdminResource. Errors: 401, 403, 404, 419, 422 (`user`), 429.
+
+### POST /api/v1/admin/users/{user}/password-reset
+- Auth: tier A. No body. Sends the standard reset email to an `active` user (queued and encrypted, same link as forgot-password) without changing the password. When the user later completes the reset, `session_epoch` is bumped with the password (all old sessions die). Audit `user.password_reset_requested`. 422 `user` when the user is not `active`, or when a reset link was sent less than 60 seconds ago.
+- Response 200 `{ "message": "A password reset email has been queued." }`. Errors: 401, 403, 404, 419, 422, 429.
+
+### POST /api/v1/admin/users/{user}/invitation (resend) and DELETE the same path (revoke)
+- Auth: tier A. Limiters as invite (resend) and `admin-writes` (revoke). Only for a user who was invited and has not accepted (422 `user` otherwise).
+- Resend: sets `active` true (re-invites a revoked one), issues a NEW token (the old one stops working), queues the mail, sets `invited_at` now, audit `user.invitation_resent`; 422 `user` if the previous invitation was created less than 60 seconds ago. Response 200 `{ "data": UserAdminResource, "meta": { "email_queued": true } }`.
+- Revoke: sets `active` false, deletes the token, bumps the epoch, audit `user.invitation_revoked`; the row stays (the email stays reserved; invite again with resend). Response 200 UserAdminResource.
+- Errors: 401, 403, 404, 419, 422, 429.
+
+### POST /api/v1/auth/accept-invitation (public)
+- Auth: none (guests). Limiter: `password-reset` (5 per 60 s per IP).
+- Body: `token`, `email`, `password` (min 10, max 255), `password_confirmation`. Behaviour: the invitation token is single use (also under concurrency: `App\Services\SingleUseToken::consume()` runs inside the broker callback in ONE transaction: lock the user row, re-check the token under the lock, delete it, then apply the change; parallel requests with the same token give exactly one 200 and the identical generic 422 for every other one), expires after `INVITATION_EXPIRE_MINUTES` (default 10080 = 7 days) and is stored hashed in `user_invitation_tokens`. Accept is serialised with revoke and deactivate: `pending` is re-checked under `lockForUpdate`, so a revoked or deactivated user can never complete an accept that raced the revoke. Expected failures are signalled by the dedicated exception `App\Exceptions\InvitationNotPending` and become the generic 422; any other failure (database error, audit insert failure) propagates as the generic 500 and rolls the whole transaction back (it is NOT swallowed into the generic 422). On success: sets the password, `invitation_accepted_at` and `email_verified_at` to now, bumps `session_epoch`, deletes the token, audit `user.invitation_accepted` (actor = that user). The user is NOT logged in; the SPA sends them to `/login`.
+- Response 200: `{ "message": "Your account is ready. You can sign in now." }`.
+- Errors: 422 validation (standard shape); 422 invalid, expired, used, revoked, wrong email, unknown email, deactivated user and non-pending user are ALL identical: `{ "message": "This invitation link is invalid or has expired.", "errors": { "email": ["This invitation link is invalid or has expired."] } }`; 419, 429. 401, 403, 404: not applicable.
+
+### GET /api/v1/admin/dashboard
+- Auth: tier S. No parameters. Scope: all companies. Not cached (live values; four aggregate queries).
+- Response 200:
+  ```json
+  {
+    "data": {
+      "generated_at": "2026-11-27T10:15:00Z",
+      "week_start": "2026-11-23",
+      "currency": "USD",
+      "quotes": { "open": 4, "awaiting_customer": 2, "expiring_soon": 1 },
+      "orders": { "this_week": 12, "pending": 3 },
+      "invoices": { "overdue_count": 2, "overdue_total_cents": 254848, "due_soon_count": 3, "due_soon_total_cents": 120000 },
+      "products": { "inactive": 3 }
+    }
+  }
+  ```
+  Definitions (all UTC, `today` = `now()` date): `week_start` is the Monday of the current ISO week; `quotes.open` = quotes in `submitted` or `in_review`; `quotes.awaiting_customer` = `quoted` with `valid_until >= today`; `quotes.expiring_soon` = the subset of those with `valid_until <= today + 7 days`; `orders.this_week` = orders of ANY status created at or after `week_start 00:00:00Z`; `orders.pending` = status `pending`; `invoices.overdue_*` = EFFECTIVE `overdue` invoices (stored `overdue`, or stored `open` with `due_date < today`), count and sum of `total_cents`; `invoices.due_soon_*` = effective `open` with `today <= due_date <= today + 7 days`; `products.inactive` = `active = false`. `currency` is `config('catalog.currency')` (all invoices share it in v1).
+- Errors: 401, 403 customer, 429.
+
+### GET /api/v1/admin/audit-log
+- Auth: tier A (staff get 403: the log also records staff behaviour and user management). Scope: everything.
+- Query: `actor_id` (integer), `action` (CSV of vocabulary values, unknown value 422), `subject_type` (one of `order|quote|invoice|product|company|user|import`), `subject_id` (string 1 to 64, exact), `company_id` (integer), `from`, `to` (`YYYY-MM-DD` UTC, inclusive, `from` after `to` is 422 on `from`), `sort` in `occurred_at`, `-occurred_at` (default `-occurred_at`), `page`, `per_page` (default 25).
+- Response 200: `{ "data": [AuditEntry], "meta": { six keys } }`.
+  ```json
+  {
+    "id": 981,
+    "occurred_at": "2026-11-27T10:15:00Z",
+    "action": "order.status_changed",
+    "actor": { "id": 2, "name": "Sam Staff", "role": "staff" },
+    "subject": { "type": "order", "id": "ORD-K7Q2M-X9PA3", "label": "ORD-K7Q2M-X9PA3" },
+    "company": { "id": 1, "name": "Northwind Machinery Ltd" },
+    "changes": { "before": { "status": "pending" }, "after": { "status": "confirmed" } },
+    "metadata": {}
+  }
+  ```
+  `actor` is null for system rows; `actor.role` is the role at the time of the action (snapshot); `company` is null when not applicable; `changes` and `metadata` contain ONLY allowlisted keys (below), filtered again when read. No IP address or user agent is stored or returned. Rows cannot be edited or deleted through any endpoint.
+- Errors: 401, 403, 422 (parameter names), 429.
+
+### Audit log (what is written, by whom)
+
+One row per change, written by `App\Services\AuditLog::record()` (model `App\Models\AuditLogEntry`) inside the transaction of the service that makes the change (not by model observers: observers miss `upsert`, double-fire on `touch`, and know no actor). `audit_log` is append-only (database trigger refuses UPDATE and DELETE). Actions (stable strings), where they are written and what `changes` may contain (allowlist; everything else is dropped before insert and again before output, values are scalars or null, strings cut at 200 characters):
+
+| Action | Subject (`subject_type`, `subject_id`) | Written by | `changes` keys (before and after) | `metadata` keys |
+| --- | --- | --- | --- | --- |
+| `order.status_changed` | order, order number | `OrderStatusChanger::change` (status endpoint AND cancel endpoint, any actor) | `status` | none |
+| `quote.reviewed`, `quote.sent`, `quote.reopened`, `quote.rejected`, `quote.accepted`, `quote.declined` | quote, quote number | `QuoteWorkflow::run` for every action that changes status (any actor) | `status`; `quote.sent` also `valid_until`, `total_cents`, `revision` | `order_number` (accepted) |
+| `quote.priced` | quote, quote number | `QuotePricing` (draft price save) | `subtotal_cents`, `total_cents`, `valid_until` | `lines_changed` (integer) |
+| `invoice.created` | invoice, invoice `id` (UUID) | `IssueInvoice` | after only: `status`, `total_cents`, `due_date` | `invoice_number`, `order_number` |
+| `invoice.paid`, `invoice.voided` | invoice, invoice `id` | `InvoiceWorkflow::markPaid`, `void` | `status`, `paid_on` | `invoice_number` (the void reason is NEVER stored here) |
+| `product.created`, `product.updated`, `product.activated`, `product.deactivated` | product, product id | `ProductAdmin` | `part_number`, `name`, `brand`, `category_id`, `inner_diameter_mm`, `outer_diameter_mm`, `width_mm`, `material`, `seal_type`, `price_cents`, `price_on_request`, `stock_status`, `active` | `description_changed` (boolean) |
+| `product.imported` | import, import id | `ProductImportService::apply` | none | `rows_read`, `created`, `updated`, `bad_rows`, `file_name` (sanitised display name), `sha256`, `applied_rows`, `skipped_rows` |
+| `company.created`, `company.updated` | company, company id | `CompanyAdmin` | `name`, `tax_id` | `billing_address_changed` (boolean) |
+| `user.invited`, `user.invitation_resent`, `user.invitation_revoked`, `user.invitation_accepted`, `user.updated`, `user.assignment_changed`, `user.deactivated`, `user.reactivated`, `user.password_reset_requested` | user, user id | `UserAdmin`, `UserInvitations` | `name`, `role`, `company_id`, `active` | none |
+
+Diff and no-change rules: for updates, keys whose value did not change are dropped from BOTH `before` and `after`. Example: `quote.sent` has `before` = `{status, revision}` only (`valid_until` and `total_cents` were null or unchanged, so they appear only in `after`). A call with no changes and no metadata writes no row, except events that carry no changes by nature, which are recorded with the `always` flag: `user.password_reset_requested`, `user.invitation_resent`, `user.invitation_accepted`.
+
+Known gap (Phase 7 follow-up): a CSV import writes ONE `product.imported` row; it does NOT write per-product audit rows for the products it created or changed (that would be unbounded, up to `max_rows` rows per request). Individual price changes made by an import are therefore visible only in aggregate (counts, file name, SHA-256).
+
+Never stored anywhere in the log: passwords, hashes, tokens, `remember_token`, `session_epoch`, email bodies, internal notes, staff notes, void reasons, customer notes, product descriptions, billing addresses, file CONTENTS, IP addresses. (The only file-related values are the sanitised display `file_name` and the `sha256` of `product.imported`.) `subject.label` is a display snapshot (order, quote or invoice number, part number, company name, user email). Not audited in v1: system jobs (`quotes:expire`, `invoices:mark-overdue`, `imports:prune`), seeders, customer order and quote creation, carts, attachments, quote notes, logins and logouts.
+
+### Changes to earlier contracts (made by this phase)
+
+- Phase 1: `/admin/ping` stays admin-only; `/staff/ping` stays staff or admin. Login for a deactivated or pending user is the wrong-credentials 422 (above). `GET /me` and every other authenticated endpoint answer 401 for a user who has just been deactivated or whose session epoch changed. Frontend: `/admin` now requires staff or admin (it was admin only); `/admin/users` and `/admin/audit-log` require admin; `/staff` redirects to `/admin`.
+- Phase 1 limiter table: the shared `api` limiter allows 240 per minute (not 60) for staff and admin users; customers and guests keep 60.
+- Phase 2: unchanged paths. `POST/PUT/PATCH/DELETE /api/v1/products...` stay 405 (writes live under `/admin/products`). Deactivation is the only way to retire a product. The importer is now a shared service; the `products:import` output and exit codes are unchanged, with one bug fix: an import whose CSV header has no `active` column never changes `active` on existing products (inserts default to true).
+- Phase 3 to 5: no path, body or response change. Two ADDITIVE list filters, open to every role within its own scope: `GET /quotes?expiring_within_days=N` (integer 1 to 30; quotes whose stored status is `quoted` with `today <= valid_until <= today + N`) and `GET /invoices?due_within_days=N` (integer 0 to 30; effectively `open` invoices with `today <= due_date <= today + N`); invalid values are 422 on the parameter name. Status changes, quote actions and invoice actions now also write audit rows (table above); a failure to write the audit row fails and rolls back the change.
+- Phase 3 amendment: staff and admin now have a status-change UI on the shared order detail page (the endpoint is unchanged).
+
+### Phase 6 endpoint summary
+
+| Method | Path | Guest | Customer | Staff | Admin |
+| --- | --- | --- | --- | --- | --- |
+| GET | /api/v1/admin/dashboard | 401 | 403 | 200 | 200 |
+| GET, POST | /api/v1/admin/products | 401 | 403 | 200 / 201, 422 | same |
+| GET, PUT | /api/v1/admin/products/{product} | 401 | 403 | 200 / 200, 404, 409, 422 | same |
+| POST | /api/v1/admin/products/{product}/activate, /deactivate | 401 | 403 | 200, 404 | same |
+| POST | /api/v1/admin/products/imports | 401 | 403 | 201, 413, 422, 429 | same |
+| POST | /api/v1/admin/products/imports/{import}/apply | 401 | 403 | 200, 404, 422, 429 | same |
+| GET | /api/v1/admin/companies, /admin/companies/{company} | 401 | 403 | 200, 404 | same |
+| POST | /api/v1/admin/companies | 401 | 403 | 403 | 201, 422 |
+| PUT | /api/v1/admin/companies/{company} | 401 | 403 | 403 | 200, 404, 409, 422 |
+| PUT | /api/v1/admin/companies/{company}/billing | 401 | 403 | 200, 404, 409, 422 | same |
+| GET, POST | /api/v1/admin/users | 401 | 403 | 403 | 200 / 201, 422 |
+| GET, PATCH | /api/v1/admin/users/{user} | 401 | 403 | 403 | 200, 404, 422 |
+| PUT | /api/v1/admin/users/{user}/assignment | 401 | 403 | 403 | 200, 404, 422 |
+| POST | /api/v1/admin/users/{user}/deactivate, /reactivate, /password-reset | 401 | 403 | 403 | 200, 404, 422 |
+| POST, DELETE | /api/v1/admin/users/{user}/invitation | 401 | 403 | 403 | 200, 404, 422 |
+| GET | /api/v1/admin/audit-log | 401 | 403 | 403 | 200, 422 |
+| GET | /api/v1/admin/ping | 401 | 403 | 403 | 200 |
+| POST | /api/v1/auth/accept-invitation | 200, 422, 429 | same | same | same |
+
+(All also return 429 over the limits above and 419 without the CSRF header on writes. A customer or staff user on a route above their tier gets 403 before any lookup, for existing and unknown ids alike; a malformed `{product}`, `{company}`, `{user}` or `{import}` is a plain 404 for every role. There is no delete endpoint for products, companies, users or audit rows.)
+
+### Frontend behaviour bound to this contract
+
+- Routes (inside `ProtectedRoute`): `/admin` (dashboard), `/admin/orders`, `/admin/orders/:number`, `/admin/quotes`, `/admin/quotes/:number`, `/admin/invoices`, `/admin/invoices/:id`, `/admin/products`, `/admin/products/new`, `/admin/products/import`, `/admin/products/:id`, `/admin/companies`, `/admin/companies/:id` require staff or admin; `/admin/users` (and `/admin/users/:id`) and `/admin/audit-log` require admin. Wrong role shows the 403 "Not allowed" page. Guest-only route `/accept-invitation` (reads `token` and `email` from the query string). `/staff` redirects to `/admin`.
+- Token hygiene (accept-invitation AND the Phase 1 reset-password page): on load the page copies `token` and `email` into component state and immediately replaces the URL (`history.replaceState`/`navigate(..., { replace: true })` to the path without a query string), so neither value stays in the address bar or in the history entry. `web/index.html` carries `<meta name="referrer" content="origin">`. Phase 7/8: send `Referrer-Policy: origin` as a real response header in production (the meta tag is only a fallback). The policy must be `origin` (Referer carries the site address but never the path or query), NOT `no-referrer`: Sanctum recognises a browser request as a stateful session request from the `Origin` or `Referer` header, and a same-site GET sends only the Referer, so `no-referrer` makes every page load and reload look like a guest request (found by the Playwright suite).
+- Back-office layout with its own navigation (label "Back office"): Dashboard, Orders, Quotes, Invoices, Products, Companies, then Users and Audit log for admin only. Hiding is UX only. The admin Orders, Quotes and Invoices pages are the existing list and detail components mounted under `/admin/...` with links pointing back into `/admin/...`; they use the existing endpoints and URL parameters. Staff and admin top navigation shows Catalog and Back office (the customer-facing Orders, Quotes and Invoices links are customer-only items from Phase 6; the old URLs keep working).
+- Admin list URLs use exactly the API parameter names (`q`, filters, `sort`, `page`); `per_page` is not in the URL; defaults omitted; invalid values dropped client-side. Tables: `<caption>`, sortable headers are buttons with `aria-sort`, pagination is a labelled `nav`, result count in an `aria-live="polite"` region, loading skeleton, empty and error (with retry) states, 429 "try again in N seconds".
+- Forms (React Hook Form + Zod) mirror the server rules and map 422 `errors` keys to fields; 409 shows a conflict banner with "Reload latest" (refetch and reset the form); destructive actions (deactivate, revoke, demote, apply import) use a confirm dialog; buttons are disabled while pending.
+- Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })`, currency from the body (dashboard `currency`). Price inputs accept `^\d{1,7}(\.\d{1,2})?$` up to 10,000,000.00 and are converted to integer cents. All user text (names, addresses, file names, error messages from CSV) is rendered as text nodes, never HTML.
+- Dashboard cards link to the filtered lists: open quotes `/admin/quotes?status=submitted,in_review`, awaiting customer `/admin/quotes?status=quoted`, expiring soon `/admin/quotes?status=quoted&expiring_within_days=7`, pending orders `/admin/orders?status=pending`, orders this week `/admin/orders?from=<week_start>`, overdue invoices `/admin/invoices?status=overdue`, due soon `/admin/invoices?status=open&due_within_days=7`, inactive products `/admin/products?active=false`.
+- E2E hooks (accessible names the Playwright tests rely on, so they are part of the contract): the order detail page has a region named "Order summary" containing the status text, an ordered list named "Status history" (one `listitem` per history entry, text includes the target status label), and, for staff and admin, one button per `allowed_transitions` entry named "Mark as confirmed", "Mark as shipped", "Mark as delivered" or "Cancel order", which opens a dialog whose confirm button is named "Confirm". The back-office navigation is a `nav` named "Back office". The audit page is a table with a caption "Audit log".

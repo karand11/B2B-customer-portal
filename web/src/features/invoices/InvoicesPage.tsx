@@ -8,6 +8,11 @@ import Pagination from '../catalog/Pagination';
 import { useUrlQuery } from '../catalog/useCatalogQuery';
 import { dateRangeError } from '../orders/urlState';
 import { useInvoices } from './api';
+import {
+  CompanyFilter,
+  WithinDays,
+  useAdminDefault,
+} from '../admin/ListFilters';
 import StatusBadge from './StatusBadge';
 import {
   EMPTY_QUERY,
@@ -24,11 +29,16 @@ const th = 'px-3 py-2 text-left text-sm font-semibold';
 const td = 'px-3 py-2 text-sm';
 const input = 'rounded border border-slate-500 px-2 py-1';
 
-export default function InvoicesPage() {
+/** `basePath` is '/admin' when mounted in the back office, so links stay inside it. */
+export default function InvoicesPage({ basePath = '' }: { basePath?: string }) {
   const { user } = useAuth();
   const { query, update } = useUrlQuery<InvoiceQuery>(parseQuery, toSearch);
   const rangeError = dateRangeError(query);
-  const invoices = useInvoices(query, !rangeError);
+  const redirecting = useAdminDefault(
+    basePath,
+    '?status=open,overdue&sort=due_date',
+  );
+  const invoices = useInvoices(query, !rangeError && !redirecting);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isStaff = user?.role !== 'customer';
   const list = invoices.data;
@@ -128,7 +138,7 @@ export default function InvoicesPage() {
                       className={`${td} ${overdue ? 'border-l-4 border-red-800' : ''}`}
                     >
                       <Link
-                        to={`/invoices/${i.id}`}
+                        to={`${basePath}/invoices/${i.id}`}
                         className="text-blue-800 underline"
                       >
                         {i.number}
@@ -136,7 +146,7 @@ export default function InvoicesPage() {
                     </td>
                     <td className={td}>
                       <Link
-                        to={`/orders/${i.order_number}`}
+                        to={`${basePath}/orders/${i.order_number}`}
                         className="text-blue-800 underline"
                       >
                         {i.order_number}
@@ -241,6 +251,20 @@ export default function InvoicesPage() {
           value={query.q}
           onCommit={(q) => update({ q }, true)}
         />
+        {basePath && (
+          <>
+            <CompanyFilter
+              value={query.company_id}
+              onChange={(company_id) => update({ company_id })}
+            />
+            <WithinDays
+              label="Due within"
+              value={query.due_within_days}
+              options={[0, 7, 14, 30]}
+              onChange={(due_within_days) => update({ due_within_days })}
+            />
+          </>
+        )}
         <div className="mb-4">
           <label
             htmlFor="invoices-sort"

@@ -190,6 +190,16 @@ function uploadTo(string $number, UploadedFile $file): TestResponse
     return test()->post("/api/v1/quotes/{$number}/attachments", ['file' => $file]);
 }
 
+/** Exact keys of the back-office resources (shared by the Admin tests). */
+const ADMIN_USER_KEYS = ['id', 'name', 'email', 'role', 'company', 'status', 'invited_at', 'invitation_accepted_at', 'created_at', 'allowed_actions'];
+
+const ADMIN_COMPANY_KEYS = ['id', 'name', 'tax_id', 'has_billing_address', 'version', 'users_count', 'open_orders_count', 'open_quotes_count', 'unpaid_invoices_count', 'created_at'];
+
+const ADMIN_PRODUCT_KEYS = [
+    'id', 'part_number', 'name', 'description', 'brand', 'category', 'inner_diameter_mm', 'outer_diameter_mm', 'width_mm', 'material', 'seal_type',
+    'price_cents', 'price_on_request', 'stock_status', 'active', 'version', 'created_at', 'updated_at',
+];
+
 /** Exact keys of an invoice in a list and in a detail (create, mark-paid and void return the detail). */
 const INVOICE_KEYS = [
     'id', 'number', 'status', 'currency', 'subtotal_cents', 'vat_rate_bp', 'tax_cents', 'total_cents', 'issue_date', 'due_date', 'paid_on',
@@ -264,6 +274,63 @@ function violates(Closure $statement, string $needle): void
     }
 
     test()->fail("The database accepted a row that violates [{$needle}].");
+}
+
+/** @return list<array<string, mixed>> every audit row, oldest first, with changes and metadata decoded */
+function auditLogRows(?string $action = null): array
+{
+    return DB::table('audit_log')->when($action, fn ($q) => $q->where('action', $action))->orderBy('id')->get()
+        ->map(fn ($r) => (array) $r)
+        ->map(fn (array $r) => array_replace($r, ['changes' => json_decode($r['changes'], true), 'metadata' => json_decode($r['metadata'], true)]))
+        ->all();
+}
+
+/** The single row of an action (the test fails when there are none or several). */
+function auditLogOne(string $action): array
+{
+    $rows = auditLogRows($action);
+    expect($rows)->toHaveCount(1, "audit rows of [{$action}]");
+
+    return $rows[0];
+}
+
+/** Assert every column of a row except the id and the timestamp. */
+function auditLogExpect(array $row, User $actor, string $type, string $subjectId, ?int $companyId, array $changes, array $metadata = []): void
+{
+    expect($row['actor_user_id'])->toBe($actor->id)
+        ->and($row['actor_role'])->toBe($actor->primaryRole())
+        ->and($row['subject_type'])->toBe($type)
+        ->and($row['subject_id'])->toBe($subjectId)
+        ->and($row['company_id'])->toBe($companyId)
+        ->and($row['changes'])->toEqual($changes)
+        ->and($row['metadata'])->toEqual($metadata);
+}
+
+function auditLogStatus(string $from, string $to): array
+{
+    return ['before' => ['status' => $from], 'after' => ['status' => $to]];
+}
+
+/** A valid POST/PUT body; every test overrides only what it tests. */
+function adminProductBody(array $overrides = []): array
+{
+    return array_replace([
+        'category_id' => category()->id, 'part_number' => '6205-2RS', 'name' => 'Deep groove ball bearing 6205-2RS 25x52x15', 'description' => null,
+        'brand' => 'SKF', 'inner_diameter_mm' => 25, 'outer_diameter_mm' => 52, 'width_mm' => 15, 'material' => 'Chrome steel', 'seal_type' => '2rs',
+        'stock_status' => 'in_stock', 'price_on_request' => false, 'price_cents' => 1250,
+    ], $overrides);
+}
+
+/** Number of queries the callback runs (the caller warms up first: the first request of a test also pays one-time costs such as loading the user's roles). */
+function adminQueryCount(Closure $request): int
+{
+    DB::flushQueryLog();
+    DB::enableQueryLog();
+    $request();
+    $count = count(DB::getQueryLog());
+    DB::disableQueryLog();
+
+    return $count;
 }
 
 /** The columns of an existing invoice row (without id) with overrides, for raw inserts that must hit a constraint. */

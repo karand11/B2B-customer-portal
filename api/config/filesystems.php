@@ -58,6 +58,15 @@ return [
             'visibility' => 'private',
         ],
 
+        // CSV import previews: never under public/, never linked, no url. Read only by the apply step; files are deleted after apply or expiry.
+        'imports' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/imports'),
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+            'visibility' => 'private',
+        ],
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),

@@ -27,6 +27,10 @@ export interface InvoiceQuery {
   from: string;
   to: string;
   q: string;
+  /** Back office only. */
+  company_id: string;
+  /** Back office only: effectively open, due within N days (0 to 30). */
+  due_within_days: string;
   sort: string;
   page: number;
 }
@@ -36,6 +40,8 @@ export const EMPTY_QUERY: InvoiceQuery = {
   from: '',
   to: '',
   q: '',
+  company_id: '',
+  due_within_days: '',
   sort: DEFAULT_SORT,
   page: 1,
 };
@@ -55,6 +61,8 @@ export function parseQuery(sp: URLSearchParams): InvoiceQuery {
   const from = sp.get('from')?.trim() ?? '';
   const to = sp.get('to')?.trim() ?? '';
   const q = (sp.get('q') ?? '').trim();
+  const company = sp.get('company_id')?.trim() ?? '';
+  const within = sp.get('due_within_days')?.trim() ?? '';
   const sort = sortSchema.safeParse(sp.get('sort'));
   const page = pageSchema.safeParse(sp.get('page') ?? undefined);
   return {
@@ -62,6 +70,8 @@ export function parseQuery(sp: URLSearchParams): InvoiceQuery {
     from: isRealDate(from) ? from : '',
     to: isRealDate(to) ? to : '',
     q: q.length <= 32 ? q : '',
+    company_id: /^[1-9]\d{0,17}$/.test(company) ? company : '',
+    due_within_days: /^([0-9]|[12]\d|30)$/.test(within) ? within : '',
     sort: sort.success ? sort.data : DEFAULT_SORT,
     page: page.success ? page.data : 1,
   };
@@ -74,6 +84,9 @@ export function toSearch(query: InvoiceQuery): string {
   if (query.from) pairs.push(['from', query.from]);
   if (query.to) pairs.push(['to', query.to]);
   if (query.q) pairs.push(['q', encodeURIComponent(query.q)]);
+  if (query.company_id) pairs.push(['company_id', query.company_id]);
+  if (query.due_within_days)
+    pairs.push(['due_within_days', query.due_within_days]);
   if (query.sort !== DEFAULT_SORT) pairs.push(['sort', query.sort]);
   if (query.page > 1) pairs.push(['page', String(query.page)]);
   return pairs.length ? `?${pairs.map(([k, v]) => `${k}=${v}`).join('&')}` : '';

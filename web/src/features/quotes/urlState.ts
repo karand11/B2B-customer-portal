@@ -34,6 +34,10 @@ export interface QuoteQuery {
   from: string;
   to: string;
   q: string;
+  /** Back office only. */
+  company_id: string;
+  /** Back office only: stored status quoted, valid_until within N days (1 to 30). */
+  expiring_within_days: string;
   sort: string; // always set; the default is omitted from the URL
   page: number;
 }
@@ -43,6 +47,8 @@ export const EMPTY_QUERY: QuoteQuery = {
   from: '',
   to: '',
   q: '',
+  company_id: '',
+  expiring_within_days: '',
   sort: DEFAULT_SORT,
   page: 1,
 };
@@ -62,6 +68,8 @@ export function parseQuery(sp: URLSearchParams): QuoteQuery {
   const from = sp.get('from')?.trim() ?? '';
   const to = sp.get('to')?.trim() ?? '';
   const q = (sp.get('q') ?? '').trim();
+  const company = sp.get('company_id')?.trim() ?? '';
+  const within = sp.get('expiring_within_days')?.trim() ?? '';
   const sort = sortSchema.safeParse(sp.get('sort'));
   const page = pageSchema.safeParse(sp.get('page') ?? undefined);
   return {
@@ -69,6 +77,8 @@ export function parseQuery(sp: URLSearchParams): QuoteQuery {
     from: isRealDate(from) ? from : '',
     to: isRealDate(to) ? to : '',
     q: q.length <= 32 ? q : '',
+    company_id: /^[1-9]\d{0,17}$/.test(company) ? company : '',
+    expiring_within_days: /^([1-9]|[12]\d|30)$/.test(within) ? within : '',
     sort: sort.success ? sort.data : DEFAULT_SORT,
     page: page.success ? page.data : 1,
   };
@@ -81,6 +91,9 @@ export function toSearch(query: QuoteQuery): string {
   if (query.from) pairs.push(['from', query.from]);
   if (query.to) pairs.push(['to', query.to]);
   if (query.q) pairs.push(['q', encodeURIComponent(query.q)]);
+  if (query.company_id) pairs.push(['company_id', query.company_id]);
+  if (query.expiring_within_days)
+    pairs.push(['expiring_within_days', query.expiring_within_days]);
   if (query.sort !== DEFAULT_SORT) pairs.push(['sort', query.sort]);
   if (query.page > 1) pairs.push(['page', String(query.page)]);
   return pairs.length ? `?${pairs.map(([k, v]) => `${k}=${v}`).join('&')}` : '';

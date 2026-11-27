@@ -28,6 +28,8 @@ export interface OrderQuery {
   from: string;
   to: string;
   q: string;
+  /** Back office only (staff and admin); the API ignores it for customers. */
+  company_id: string;
   sort: string; // always set; the default is omitted from the URL
   page: number;
 }
@@ -37,6 +39,7 @@ export const EMPTY_QUERY: OrderQuery = {
   from: '',
   to: '',
   q: '',
+  company_id: '',
   sort: DEFAULT_SORT,
   page: 1,
 };
@@ -69,6 +72,7 @@ export function parseQuery(sp: URLSearchParams): OrderQuery {
   const from = sp.get('from')?.trim() ?? '';
   const to = sp.get('to')?.trim() ?? '';
   const q = (sp.get('q') ?? '').trim();
+  const company = sp.get('company_id')?.trim() ?? '';
   const sort = sortSchema.safeParse(sp.get('sort'));
   const page = pageSchema.safeParse(sp.get('page') ?? undefined);
   return {
@@ -76,6 +80,7 @@ export function parseQuery(sp: URLSearchParams): OrderQuery {
     from: isRealDate(from) ? from : '',
     to: isRealDate(to) ? to : '',
     q: q.length <= 32 ? q : '',
+    company_id: /^[1-9]\d{0,17}$/.test(company) ? company : '',
     sort: sort.success ? sort.data : DEFAULT_SORT,
     page: page.success ? page.data : 1,
   };
@@ -88,6 +93,7 @@ export function toSearch(query: OrderQuery): string {
   if (query.from) pairs.push(['from', query.from]);
   if (query.to) pairs.push(['to', query.to]);
   if (query.q) pairs.push(['q', encodeURIComponent(query.q)]);
+  if (query.company_id) pairs.push(['company_id', query.company_id]);
   if (query.sort !== DEFAULT_SORT) pairs.push(['sort', query.sort]);
   if (query.page > 1) pairs.push(['page', String(query.page)]);
   return pairs.length ? `?${pairs.map(([k, v]) => `${k}=${v}`).join('&')}` : '';

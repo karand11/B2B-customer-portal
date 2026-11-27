@@ -32,12 +32,12 @@ const th = 'px-3 py-2 text-left text-sm font-semibold';
 const td = 'px-3 py-2 text-sm';
 const btn = 'rounded border border-slate-600 px-3 py-1 disabled:opacity-60';
 
-function QuoteNotFound() {
+function QuoteNotFound({ basePath }: { basePath: string }) {
   return (
     <section>
       <h1 className="mb-2 text-2xl font-semibold">Quote not found</h1>
       <p className="mb-2">This quote does not exist or you cannot view it.</p>
-      <Link to="/quotes" className="text-blue-800 underline">
+      <Link to={`${basePath}/quotes`} className="text-blue-800 underline">
         Back to quotes
       </Link>
     </section>
@@ -221,7 +221,11 @@ function Actions({ quote }: { quote: QuoteDetail }) {
   );
 }
 
-export default function QuoteDetailPage() {
+export default function QuoteDetailPage({
+  basePath = '',
+}: {
+  basePath?: string;
+}) {
   const { number = '' } = useParams();
   const { user } = useAuth();
   const { state } = useLocation();
@@ -239,9 +243,9 @@ export default function QuoteDetailPage() {
     if (created && loaded) bannerRef.current?.focus();
   }, [created, loaded]);
 
-  if (!valid) return <QuoteNotFound />;
+  if (!valid) return <QuoteNotFound basePath={basePath} />;
   if (q.error instanceof ApiError && q.error.status === 404)
-    return <QuoteNotFound />;
+    return <QuoteNotFound basePath={basePath} />;
   if (q.isError && !q.data)
     return <CatalogError error={q.error} onRetry={() => void q.refetch()} />;
   const o = q.data;
@@ -298,7 +302,7 @@ export default function QuoteDetailPage() {
           )}
         </div>
       )}
-      <Link to="/quotes" className="text-blue-800 underline">
+      <Link to={`${basePath}/quotes`} className="text-blue-800 underline">
         Back to quotes
       </Link>
       <h1 className="mt-2 mb-1 text-2xl font-semibold">
@@ -306,14 +310,29 @@ export default function QuoteDetailPage() {
       </h1>
       <p className="text-sm">
         Requested by {o.requested_by.name} on {formatDate(o.created_at)}
-        {!isCustomer && <> for {o.company.name}</>}
+        {!isCustomer && (
+          <>
+            {' '}
+            for{' '}
+            {basePath ? (
+              <Link
+                to={`${basePath}/companies/${o.company.id}`}
+                className="text-blue-800 underline"
+              >
+                {o.company.name}
+              </Link>
+            ) : (
+              o.company.name
+            )}
+          </>
+        )}
       </p>
       <p className="text-sm">PO reference: {o.po_reference ?? 'None'}</p>
       {o.order && (
         <p className="text-sm">
           Order{' '}
           <Link
-            to={`/orders/${o.order.number}`}
+            to={`${basePath}/orders/${o.order.number}`}
             className="text-blue-800 underline"
           >
             {o.order.number}

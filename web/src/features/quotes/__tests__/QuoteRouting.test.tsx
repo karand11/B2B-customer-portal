@@ -50,11 +50,21 @@ describe('quote routing and navigation', () => {
   it.each([
     ['staff', staff],
     ['admin', admin],
-  ])('%s sees Quotes in the nav and the list', async (_n, who) => {
-    setupApp('/quotes', { [LIST]: { body: listOf([]) }, [ME]: meOk(who) }, who);
-    expect(await screen.findByText('No quotes.')).toBeInTheDocument();
-    expect(nav().getByRole('link', { name: 'Quotes' })).toBeInTheDocument();
-  });
+  ])(
+    '%s can still open /quotes (old URL) and has no Quotes top-nav item',
+    async (_n, who) => {
+      setupApp(
+        '/quotes',
+        { [LIST]: { body: listOf([]) }, [ME]: meOk(who) },
+        who,
+      );
+      expect(await screen.findByText('No quotes.')).toBeInTheDocument();
+      expect(nav().queryByRole('link', { name: 'Quotes' })).toBeNull();
+      expect(
+        nav().getByRole('link', { name: 'Back office' }),
+      ).toBeInTheDocument();
+    },
+  );
 
   it.each([
     ['staff', staff],

@@ -62,11 +62,19 @@ class IssueInvoice
 
         $attributes = $this->snapshots->attributes($order, $items, $number, $dueDate, $rate, $actor->id, $seller, $buyer);
 
-        return $this->snapshots->write(
+        $invoice = $this->snapshots->write(
             $attributes,
             $this->snapshots->itemRows($items, $attributes['created_at']),
             [['from_status' => null, 'to_status' => 'open', 'actor_user_id' => $actor->id, 'note' => null, 'created_at' => $attributes['created_at']]],
         );
+
+        AuditLog::record(
+            'invoice.created', 'invoice', $invoice->public_id, $invoice->number, $actor,
+            [], ['status' => 'open', 'total_cents' => $invoice->total_cents, 'due_date' => $dueDate],
+            ['invoice_number' => $invoice->number, 'order_number' => $order->order_number], $invoice->company_id,
+        );
+
+        return $invoice;
     }
 
     /** The override was validated against today at request time; re-check it against the real issue date (midnight may have passed). */

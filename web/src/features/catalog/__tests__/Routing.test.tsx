@@ -20,24 +20,8 @@ describe('roles and routing', () => {
       customer,
       ['Home', 'Catalog', 'Orders', 'Quotes', 'Invoices', 'Cart'],
     ],
-    [
-      'staff',
-      staff,
-      ['Home', 'Catalog', 'Orders', 'Quotes', 'Invoices', 'Staff area'],
-    ],
-    [
-      'admin',
-      admin,
-      [
-        'Home',
-        'Catalog',
-        'Orders',
-        'Quotes',
-        'Invoices',
-        'Staff area',
-        'Admin area',
-      ],
-    ],
+    ['staff', staff, ['Home', 'Catalog', 'Back office']],
+    ['admin', admin, ['Home', 'Catalog', 'Back office']],
   ])(
     '%s sees the Catalog nav item and can open /catalog',
     async (_n, user, links) => {

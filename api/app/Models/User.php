@@ -30,11 +30,21 @@ class User extends Authenticatable
         'remember_token',
     ];
 
+    /** Same as the column defaults, so a freshly built model (factory, forceFill) is already active at epoch 1 without a refresh. */
+    protected $attributes = [
+        'active' => true,
+        'session_epoch' => 1,
+    ];
+
     protected function casts(): array
     {
         return [
             'email_verified_at' => 'datetime',
             'password' => 'hashed',
+            'active' => 'boolean',
+            'session_epoch' => 'integer',
+            'invited_at' => 'datetime',
+            'invitation_accepted_at' => 'datetime',
         ];
     }
 
@@ -72,13 +82,39 @@ class User extends Authenticatable
         $this->notify(new ResetPasswordNotification($token));
     }
 
+    /** The one role (users have exactly one); loadMissing is an explicit load, not a lazy-loading violation. */
+    public function primaryRole(): ?string
+    {
+        return $this->loadMissing('roles')->roles->first()?->name;
+    }
+
+    /** inactive (deactivated or revoked) > pending (invited, not accepted) > active. */
+    public function status(): string
+    {
+        return match (true) {
+            ! $this->active => 'inactive',
+            $this->invited_at !== null && $this->invitation_accepted_at === null => 'pending',
+            default => 'active',
+        };
+    }
+
+    /** Only active users can sign in or keep a session. */
+    public function canSignIn(): bool
+    {
+        return $this->status() === 'active';
+    }
+
+    /** Invited and never accepted (pending, or revoked and so inactive). */
+    public function hasOpenInvitation(): bool
+    {
+        return $this->invited_at !== null && $this->invitation_accepted_at === null;
+    }
+
     /**
-     * The only sanctioned way to create/update a user with a role (seeders, future invite flow).
-     * Enforces: customer => company required; staff/admin => no company; exactly one role.
-     *
-     * @param  array<string, mixed>  $attributes  name, password, email_verified_at, ...
+     * The one place that sets role and company (provision, invitations, the admin assignment endpoint).
+     * Enforces: customer => company required; staff/admin => no company; exactly one role. Saves the model.
      */
-    public static function provision(string $role, string $email, array $attributes, ?Company $company = null): static
+    public function assign(string $role, ?Company $company): static
     {
         if (! in_array($role, ['customer', 'staff', 'admin'], true)) {
             throw new InvalidArgumentException("Unknown role [$role].");
@@ -87,10 +123,20 @@ class User extends Authenticatable
             throw new InvalidArgumentException('Customers need a company; staff and admin must not have one.');
         }
 
-        $user = static::firstOrNew(['email' => $email]);
-        $user->forceFill($attributes + ['company_id' => $company?->id])->save();
-        $user->syncRoles($role);
+        $this->forceFill(['company_id' => $company?->id])->save();
+        $this->syncRoles($role);
+        $this->unsetRelation('roles')->unsetRelation('company');
 
-        return $user;
+        return $this;
+    }
+
+    /**
+     * The only sanctioned way to create/update a user with a role (seeders, invite flow).
+     *
+     * @param  array<string, mixed>  $attributes  name, password, email_verified_at, ...
+     */
+    public static function provision(string $role, string $email, array $attributes, ?Company $company = null): static
+    {
+        return static::firstOrNew(['email' => $email])->forceFill($attributes)->assign($role, $company);
     }
 }

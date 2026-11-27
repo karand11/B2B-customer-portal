@@ -28,7 +28,11 @@ class InvoiceWorkflow
                 throw ValidationException::withMessages(['paid_on' => 'The payment date cannot be before the invoice issue date.']);
             }
 
-            return $this->change($locked, InvoiceStatus::Paid, $actor, null, ['paid_on' => $paidOn]);
+            $from = $locked->status;
+            $this->change($locked, InvoiceStatus::Paid, $actor, null, ['paid_on' => $paidOn]);
+            $this->audit('invoice.paid', $locked, $actor, $from, ['paid_on' => null], ['paid_on' => $paidOn]);
+
+            return $locked;
         });
     }
 
@@ -38,8 +42,22 @@ class InvoiceWorkflow
             $locked = $this->lock($invoice->id);
             $this->assertSettleable($locked, 'Only open or overdue invoices can be voided.');
 
-            return $this->change($locked, InvoiceStatus::Void, $actor, $reason);
+            $from = $locked->status;
+            $this->change($locked, InvoiceStatus::Void, $actor, $reason);
+            $this->audit('invoice.voided', $locked, $actor, $from);
+
+            return $locked;
         });
+    }
+
+    /** The void reason is never copied here (it stays in the customer-visible history only). */
+    private function audit(string $action, Invoice $invoice, User $actor, InvoiceStatus $from, array $before = [], array $after = []): void
+    {
+        AuditLog::record(
+            $action, 'invoice', $invoice->public_id, $invoice->number, $actor,
+            ['status' => $from->value] + $before, ['status' => $invoice->status->value] + $after,
+            ['invoice_number' => $invoice->number], $invoice->company_id,
+        );
     }
 
     /** Materialise an overdue (invoices:mark-overdue). False when the invoice is no longer stored-open-and-past-due once locked. */

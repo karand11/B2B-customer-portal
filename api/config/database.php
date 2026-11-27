@@ -95,6 +95,8 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => 'prefer',
+            // timestamptz columns (Phase 6) are written without an offset: pin the session to UTC so a server in another zone cannot shift them.
+            'timezone' => 'UTC',
         ],
 
         'sqlsrv' => [

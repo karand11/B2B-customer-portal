@@ -61,7 +61,7 @@ Not added: `is_active`, `phone`, `last_login_at` (not needed yet; Phase 6 may ad
 
 ### 3.4 `password_reset_tokens` (exists, unchanged)
 
-`email` varchar PK, `token` varchar (stored HASHED by Laravel), `created_at` timestamp null. One row per email, so a new request replaces the previous token. Token lifetime 60 minutes (`auth.passwords.users.expire = 60`), per-user resend throttle 60 s (`throttle = 60`). Row is deleted on successful reset (this is what makes the token single use).
+`email` varchar PK, `token` varchar (stored HASHED by Laravel), `created_at` timestamp null. One row per email, so a new request replaces the previous token. Token lifetime 60 minutes (`auth.passwords.users.expire = 60`), per-user resend throttle 60 s (`throttle = 60`). Row is deleted on successful reset (this is what makes the token single use). Phase 6 made this hold under concurrency: `App\Services\SingleUseToken::consume()` runs inside the broker callback in one transaction (lock the user row, re-check the token under the lock, delete it, then change the password and bump `session_epoch`), so parallel requests with the same token give exactly one 200 and the identical generic 422 for the rest. The queued `ResetPasswordNotification` is `ShouldBeEncrypted` (no token in the `jobs` payload).
 
 ### 3.5 `sessions`, `personal_access_tokens`
 
@@ -170,7 +170,7 @@ Gate items:
 4. Login rate limit: 5 wrong passwords -> 422 each, 6th -> 429 with `Retry-After` header > 0; then the CORRECT password for the same email -> still 429; a different email from the same IP is not blocked; after `travel(61)->seconds` login works; a successful login resets the counter (4 failures, success, 4 more failures, no 429).
 5. Unauthenticated `GET /me` -> 401 JSON (no redirect, `Location` header absent); customer on `GET /staff/ping` -> 403; guest on it -> 401.
 6. Password reset email is sent: `POST forgot-password` for a known user returns 200 and the generic message; the queued reset notification is delivered (use the `array` mailer, `QUEUE_CONNECTION=sync`, or `Notification::fake()` with `assertSentTo`); the link starts with `http://localhost:5173/reset-password?token=` and contains `email=` URL-encoded, and does NOT contain the API host.
-7. Reset token works once: first `POST reset-password` -> 200, password changed (old password login 422, new password login 200); the same token again -> 422 invalid-link body.
+7. Reset token works once, also under concurrency (Phase 6 addition): first `POST reset-password` -> 200, password changed (old password login 422, new password login 200); the same token again -> 422 invalid-link body; N parallel requests with the same token (real processes, see Phase 6 design 9.1 item 11) -> exactly one 200, the rest the identical generic 422. An old session of that user gets 401 on its next request (`session_epoch` bumped in the same save).
 
 Role guards:
 8. `GET /staff/ping`: guest 401, customer 403, staff 200 `{status: ok}`, admin 200. `GET /admin/ping`: guest 401, customer 403, staff 403, admin 200.

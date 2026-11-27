@@ -41,7 +41,8 @@ class AuthController extends Controller
 
         $user = User::where('email', $request->input('email'))->first();
         // One hash operation whether or not the user exists, so timing does not reveal accounts.
-        $valid = $user && Hash::check($request->input('password'), $user->password);
+        // A deactivated or pending user gets the same wrong-credentials answer, after the same hash check, and counts toward the limiters.
+        $valid = $user && Hash::check($request->input('password'), $user->password) && $user->canSignIn();
         if (! $user) {
             Hash::make($request->input('password'));
         }
@@ -58,6 +59,10 @@ class AuthController extends Controller
         RateLimiter::clear($key);
         Auth::guard('web')->login($user);
         $request->session()->regenerate();
+        // Compared by the `active` middleware on every request: bumping users.session_epoch kills this session.
+        $request->session()->put('session_epoch', $user->session_epoch);
+        // The api rate limiter reads the role from here (no query per request). A role change bumps the epoch, so this can never be stale.
+        $request->session()->put('role', $user->primaryRole());
 
         return new UserResource($user->load('company', 'roles'));
     }

@@ -149,6 +149,8 @@ describe('quote list url state', () => {
       from: '',
       to: '',
       q: '',
+      company_id: '',
+      expiring_within_days: '',
       sort: '-created_at',
       page: 1,
     });

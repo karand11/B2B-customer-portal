@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ForgotPasswordRequest;
 use App\Http\Requests\ResetPasswordRequest;
 use App\Models\User;
+use App\Services\SingleUseToken;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Hash;
@@ -31,9 +32,17 @@ class PasswordResetController extends Controller
     {
         $status = Password::reset(
             $request->only('email', 'password', 'password_confirmation', 'token'),
-            function (User $user, string $password) {
-                $user->forceFill(['password' => $password, 'remember_token' => Str::random(60)])->save();
-                event(new PasswordReset($user));
+            function (User $user, string $password) use ($request) {
+                // Under the row lock, token consumed in the same transaction (SingleUseToken): one request wins, the rest get the generic 422.
+                $invalid = ValidationException::withMessages(['email' => ['This password reset link is invalid or has expired.']]);
+
+                SingleUseToken::consume(Password::broker(), $user, $request->input('token'), function (User $locked) use ($password, $invalid) {
+                    // A deactivated or pending user cannot complete a reset (their tokens are deleted on deactivation; this is the backstop).
+                    $locked->canSignIn() || throw $invalid;
+                    // The epoch moves with the password: every session signed in before the reset dies on its next request.
+                    $locked->forceFill(['password' => $password, 'remember_token' => Str::random(60), 'session_epoch' => $locked->session_epoch + 1])->save();
+                    event(new PasswordReset($locked));
+                }) || throw $invalid;
             },
         );
 

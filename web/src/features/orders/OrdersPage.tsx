@@ -7,6 +7,7 @@ import { SearchBox } from '../catalog/FilterSidebar';
 import Pagination from '../catalog/Pagination';
 import { useUrlQuery } from '../catalog/useCatalogQuery';
 import { useOrders } from './api';
+import { CompanyFilter, useAdminDefault } from '../admin/ListFilters';
 import StatusBadge from './StatusBadge';
 import {
   EMPTY_QUERY,
@@ -24,11 +25,16 @@ const th = 'px-3 py-2 text-left text-sm font-semibold';
 const td = 'px-3 py-2 text-sm';
 const input = 'rounded border border-slate-500 px-2 py-1';
 
-export default function OrdersPage() {
+/** `basePath` is '/admin' when mounted in the back office, so links stay inside it. */
+export default function OrdersPage({ basePath = '' }: { basePath?: string }) {
   const { user } = useAuth();
   const { query, update } = useUrlQuery<OrderQuery>(parseQuery, toSearch);
   const rangeError = dateRangeError(query);
-  const orders = useOrders(query, !rangeError);
+  const redirecting = useAdminDefault(
+    basePath,
+    '?status=pending&sort=created_at',
+  );
+  const orders = useOrders(query, !rangeError && !redirecting);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const isStaff = user?.role !== 'customer';
   const list = orders.data;
@@ -130,14 +136,27 @@ export default function OrdersPage() {
                 <tr key={o.number} className="border-b border-slate-300">
                   <td className={td}>
                     <Link
-                      to={`/orders/${o.number}`}
+                      to={`${basePath}/orders/${o.number}`}
                       className="text-blue-800 underline"
                     >
                       {o.number}
                     </Link>
                   </td>
                   <td className={td}>{o.po_reference ?? '-'}</td>
-                  {isStaff && <td className={td}>{o.company.name}</td>}
+                  {isStaff && (
+                    <td className={td}>
+                      {basePath ? (
+                        <Link
+                          to={`${basePath}/companies/${o.company.id}`}
+                          className="text-blue-800 underline"
+                        >
+                          {o.company.name}
+                        </Link>
+                      ) : (
+                        o.company.name
+                      )}
+                    </td>
+                  )}
                   <td className={td}>{formatDate(o.created_at)}</td>
                   <td className={td}>
                     <StatusBadge status={o.status} />
@@ -226,6 +245,12 @@ export default function OrdersPage() {
           value={query.q}
           onCommit={(q) => update({ q }, true)}
         />
+        {basePath && (
+          <CompanyFilter
+            value={query.company_id}
+            onChange={(company_id) => update({ company_id })}
+          />
+        )}
         <div className="mb-4">
           <label
             htmlFor="orders-sort"

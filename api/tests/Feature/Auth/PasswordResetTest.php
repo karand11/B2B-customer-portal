@@ -4,6 +4,7 @@ use App\Models\User;
 use App\Notifications\ResetPasswordNotification;
 use Database\Seeders\DemoSeeder;
 use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 
 const GENERIC_FORGOT = 'If an account exists for that email, a reset link has been sent.';
@@ -176,4 +177,54 @@ it('invalidates other sessions of the user after a password reset', function () 
     // Drop the guard's cached user so only the old session cookie counts.
     $this->app['auth']->forgetGuards();
     $this->getJson('/api/v1/me')->assertUnauthorized();
+});
+
+it('moves the session epoch with the password so every old session dies, and the user can sign in again', function (bool $byAdmin) {
+    $login = $this->postJson('/api/v1/auth/login', ['email' => 'alice@northwind.test', 'password' => TEST_PASSWORD])->assertOk();
+    carrySession($login);
+    $this->getJson('/api/v1/me')->assertOk();
+    $epoch = $this->alice->fresh()->session_epoch;
+
+    if ($byAdmin) {
+        Notification::fake();
+        $this->actingAs(makeUser('admin'))->postJson("/api/v1/admin/users/{$this->alice->id}/password-reset")->assertOk();
+        $token = Notification::sent($this->alice, ResetPasswordNotification::class)->first()->token;
+    } else {
+        $token = requestResetToken($this->alice);
+    }
+    $this->app['auth']->forgetGuards();
+    $this->postJson('/api/v1/auth/reset-password', resetBody($token))->assertOk();
+
+    expect($this->alice->fresh()->session_epoch)->toBe($epoch + 1);
+
+    // The old cookie alone, with nothing else in the test client: the `active` middleware compares the epoch.
+    $this->flushSession();
+    $this->app['auth']->forgetGuards();
+    $this->withSession(['session_epoch' => $epoch])->getJson('/api/v1/me')->assertUnauthorized();
+
+    $new = $this->postJson('/api/v1/auth/login', ['email' => 'alice@northwind.test', 'password' => NEW_PASSWORD])->assertOk();
+    carrySession($new);
+    $this->getJson('/api/v1/me')->assertOk();
+})->with(['requested by the user' => [false], 'requested by an admin' => [true]]);
+
+it('keeps the reset token out of the queued job payload and still delivers a working link after the worker decrypts it', function () {
+    config(['queue.default' => 'database']);
+
+    $this->postJson('/api/v1/auth/forgot-password', ['email' => 'alice@northwind.test'])->assertOk();
+
+    $payload = (string) DB::table('jobs')->value('payload');
+    expect(DB::table('jobs')->count())->toBe(1)->and($payload)->toContain('"command":"')
+        ->and($payload)->not->toContain('token=')->not->toContain('alice')
+        ->and(json_decode($payload, true)['data']['command'])->not->toStartWith('O:'); // the class name in displayName is metadata; the command is encrypted
+    expect(app('mailer')->getSymfonyTransport()->messages())->toHaveCount(0);
+
+    $this->artisan('queue:work', ['--once' => true, '--stop-when-empty' => true])->assertSuccessful();
+
+    $messages = app('mailer')->getSymfonyTransport()->messages();
+    expect($messages)->toHaveCount(1);
+    $body = quoted_printable_decode($messages[0]->getOriginalMessage()->toString());
+    preg_match('#reset-password\?token=([A-Za-z0-9]+)#', $body, $found);
+    expect($found)->toHaveCount(2)->and($payload)->not->toContain($found[1]);
+
+    $this->postJson('/api/v1/auth/reset-password', resetBody($found[1]))->assertOk();
 });

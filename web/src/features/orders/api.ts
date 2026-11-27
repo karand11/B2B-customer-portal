@@ -127,6 +127,23 @@ export function useCancelOrder(number: string) {
   });
 }
 
+/** Staff and admin: PATCH /orders/{number}/status with the target status only. */
+export function useChangeOrderStatus(number: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (status: OrderStatus) =>
+      api.patch<{ data: OrderDetail }>(`/api/v1/orders/${number}/status`, {
+        status,
+      }),
+    onSuccess: (res) => {
+      qc.setQueryData(detailKey(number), res.data);
+      void qc.invalidateQueries({ queryKey: ['orders', 'list'] });
+    },
+    // A 422 means the state moved under us: show the server text, then refetch.
+    onError: () => void qc.invalidateQueries({ queryKey: detailKey(number) }),
+  });
+}
+
 export function useReorder(number: string) {
   const qc = useQueryClient();
   return useMutation({

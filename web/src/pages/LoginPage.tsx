@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useMutation } from '@tanstack/react-query';
@@ -17,6 +17,8 @@ type Values = z.infer<typeof schema>;
 
 export default function LoginPage() {
   const { login } = useAuth();
+  // Set by the accept-invitation page after success.
+  const notice = (useLocation().state as { notice?: unknown } | null)?.notice;
   const {
     register,
     handleSubmit,
@@ -28,6 +30,11 @@ export default function LoginPage() {
   return (
     <section>
       <h1 className="mb-4 text-2xl font-semibold">Sign in</h1>
+      {typeof notice === 'string' && (
+        <p role="status" className="mb-4 text-green-900">
+          {notice}
+        </p>
+      )}
       <form onSubmit={handleSubmit((v) => mutation.mutate(v))} noValidate>
         <TextField
           id="email"

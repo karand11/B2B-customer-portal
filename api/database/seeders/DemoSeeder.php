@@ -16,10 +16,10 @@ class DemoSeeder extends Seeder
 
         $this->call(RolesSeeder::class);
 
-        $northwind = Company::firstOrCreate(['name' => 'Northwind Machinery Ltd']);
-        $globex = Company::firstOrCreate(['name' => 'Globex Industrial Supply']);
+        $northwind = Company::where('name', 'Northwind Machinery Ltd')->first() ?? (new Company)->forceFill(['name' => 'Northwind Machinery Ltd']);
+        $globex = Company::where('name', 'Globex Industrial Supply')->first() ?? (new Company)->forceFill(['name' => 'Globex Industrial Supply']);
 
-        // Obviously fake billing data for invoices (not mass-assignable and not editable through the API yet).
+        // Obviously fake billing data for invoices.
         $northwind->forceFill(['billing_address' => "12 Example Road\nSampletown 00000\nExampleland", 'tax_id' => 'NW-TAX-0001'])->save();
         $globex->forceFill(['billing_address' => "99 Sample Avenue\nTestville 11111\nExampleland", 'tax_id' => 'GX-TAX-0002'])->save();
 

@@ -4,6 +4,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Support\InvoiceTotals;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\MassAssignmentException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -100,8 +101,9 @@ it('rejects a bad counter row and a bad company billing value', function () {
 
 it('never mass-assigns billing data on a company', function () {
     $company = new Company;
-    $company->fill(['name' => 'X', 'billing_address' => 'Hack', 'tax_id' => 'Hack']);
 
+    // Nothing on a company is mass-assignable (the name included): fill() refuses instead of silently dropping.
+    expect(fn () => $company->fill(['name' => 'X', 'billing_address' => 'Hack', 'tax_id' => 'Hack']))->toThrow(MassAssignmentException::class);
     expect($company->billing_address)->toBeNull()->and($company->tax_id)->toBeNull();
 });
 

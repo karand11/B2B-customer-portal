@@ -1,5 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\V1\AcceptInvitationController;
+use App\Http\Controllers\Api\V1\Admin\AuditLogController;
+use App\Http\Controllers\Api\V1\Admin\CompanyController;
+use App\Http\Controllers\Api\V1\Admin\DashboardController;
+use App\Http\Controllers\Api\V1\Admin\ProductController as AdminProductController;
+use App\Http\Controllers\Api\V1\Admin\ProductImportController;
+use App\Http\Controllers\Api\V1\Admin\UserController;
+use App\Http\Controllers\Api\V1\Admin\UserInvitationController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
@@ -10,6 +18,7 @@ use App\Http\Controllers\Api\V1\PasswordResetController;
 use App\Http\Controllers\Api\V1\ProductController;
 use App\Http\Controllers\Api\V1\QuoteAttachmentController;
 use App\Http\Controllers\Api\V1\QuoteController;
+use App\Models\ProductImport;
 use Illuminate\Support\Facades\Route;
 
 // Order numbers (ORD-XXXXX-XXXXX) are the only public order id; anything else is a 404.
@@ -20,6 +29,15 @@ Route::pattern('attachment', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0
 // Invoices are addressed by random lowercase UUID (never the sequential number); anything else is a plain 404 before any middleware.
 Route::pattern('invoice', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
 
+// Back-office ids: numeric for products, companies and users (reachable by staff and admin only, so enumeration is not a customer risk),
+// a random UUID for CSV imports. Anything else is a plain 404 before any middleware.
+Route::pattern('product', '[0-9]{1,18}');
+Route::pattern('company', '[0-9]{1,18}');
+Route::pattern('user', '[0-9]{1,18}');
+Route::pattern('import', '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}');
+// An import token only resolves for the user who uploaded it: another user's token is indistinguishable from an unknown one (404).
+Route::bind('import', fn (string $id) => ProductImport::where('user_id', request()->user()?->id)->whereKey($id)->firstOrFail());
+
 Route::prefix('v1')->group(function () {
     Route::get('/health', fn () => response()->json(['status' => 'ok']));
 
@@ -27,13 +45,64 @@ Route::prefix('v1')->group(function () {
         Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login-ip');
         Route::post('/forgot-password', [PasswordResetController::class, 'forgot'])->middleware('throttle:password-reset');
         Route::post('/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:password-reset');
+        Route::post('/accept-invitation', AcceptInvitationController::class)->middleware('throttle:password-reset');
         Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth:sanctum');
     });
 
-    Route::middleware('auth:sanctum')->group(function () {
+    Route::middleware(['auth:sanctum', 'active'])->group(function () {
         Route::get('/me', MeController::class);
         Route::get('/staff/ping', fn () => response()->json(['status' => 'ok']))->middleware('role:staff|admin');
         Route::get('/admin/ping', fn () => response()->json(['status' => 'ok']))->middleware('role:admin');
+
+        // Back office. Tier S (staff or admin) and tier A (admin only); the role check runs before every limiter and lookup.
+        Route::prefix('admin')->group(function () {
+            Route::middleware('role:staff|admin')->group(function () {
+                Route::get('/dashboard', DashboardController::class);
+
+                Route::get('/products', [AdminProductController::class, 'index']);
+                Route::get('/products/{product}', [AdminProductController::class, 'show']);
+
+                Route::get('/companies', [CompanyController::class, 'index']);
+                Route::get('/companies/{company}', [CompanyController::class, 'show']);
+
+                Route::middleware('throttle:admin-writes')->group(function () {
+                    Route::post('/products', [AdminProductController::class, 'store']);
+                    Route::put('/products/{product}', [AdminProductController::class, 'update']);
+                    Route::post('/products/{product}/activate', [AdminProductController::class, 'activate']);
+                    Route::post('/products/{product}/deactivate', [AdminProductController::class, 'deactivate']);
+                    Route::put('/companies/{company}/billing', [CompanyController::class, 'updateBilling']);
+
+                    // Every attempt counts, including 422s.
+                    Route::middleware(['throttle:admin-import', 'throttle:admin-import-hourly'])->group(function () {
+                        Route::post('/products/imports', [ProductImportController::class, 'preview']);
+                        Route::post('/products/imports/{import}/apply', [ProductImportController::class, 'apply']);
+                    });
+                });
+            });
+
+            Route::middleware('role:admin')->group(function () {
+                Route::get('/audit-log', [AuditLogController::class, 'index']);
+                Route::get('/users', [UserController::class, 'index']);
+                Route::get('/users/{user}', [UserController::class, 'show']);
+
+                Route::middleware('throttle:admin-writes')->group(function () {
+                    Route::post('/companies', [CompanyController::class, 'store']);
+                    Route::put('/companies/{company}', [CompanyController::class, 'update']);
+
+                    Route::patch('/users/{user}', [UserController::class, 'update']);
+                    Route::put('/users/{user}/assignment', [UserController::class, 'assign']);
+                    Route::post('/users/{user}/deactivate', [UserController::class, 'deactivate']);
+                    Route::post('/users/{user}/reactivate', [UserController::class, 'reactivate']);
+                    Route::post('/users/{user}/password-reset', [UserController::class, 'passwordReset']);
+                    Route::delete('/users/{user}/invitation', [UserInvitationController::class, 'revoke']);
+
+                    Route::middleware('throttle:admin-invites')->group(function () {
+                        Route::post('/users', [UserController::class, 'store']);
+                        Route::post('/users/{user}/invitation', [UserInvitationController::class, 'resend']);
+                    });
+                });
+            });
+        });
 
         // /products/filters must be declared before /products/{id}.
         Route::get('/products', [ProductController::class, 'index']);

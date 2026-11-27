@@ -15,6 +15,13 @@ export default function HomePage() {
           Browse the product catalog
         </Link>
       </p>
+      {user.role !== 'customer' && (
+        <p className="mt-2">
+          <Link to="/admin" className="text-blue-800 underline">
+            Open the back office
+          </Link>
+        </p>
+      )}
     </section>
   );
 }

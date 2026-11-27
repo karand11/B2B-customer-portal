@@ -98,38 +98,21 @@ describe('role-based navigation', () => {
       'Invoices',
       'Cart',
     ]);
-    expect(screen.queryByText('Staff area')).toBeNull();
-    expect(screen.queryByText('Admin area')).toBeNull();
+    expect(screen.queryByText('Back office')).toBeNull();
   });
 
-  it('staff sees Orders, Quotes and Staff area, no Cart and no Admin area', async () => {
+  it('staff sees Home, Catalog and Back office only', async () => {
     mockApi({ [ME]: meOk(staff) });
     renderApp('/');
     await screen.findByRole('navigation', { name: /main/i });
-    expect(links()).toEqual([
-      'Home',
-      'Catalog',
-      'Orders',
-      'Quotes',
-      'Invoices',
-      'Staff area',
-    ]);
-    expect(screen.queryByText('Admin area')).toBeNull();
+    expect(links()).toEqual(['Home', 'Catalog', 'Back office']);
   });
 
-  it('admin sees all but Cart', async () => {
+  it('admin sees Home, Catalog and Back office only (no Cart)', async () => {
     mockApi({ [ME]: meOk(admin) });
     renderApp('/');
     await screen.findByRole('navigation', { name: /main/i });
-    expect(links()).toEqual([
-      'Home',
-      'Catalog',
-      'Orders',
-      'Quotes',
-      'Invoices',
-      'Staff area',
-      'Admin area',
-    ]);
+    expect(links()).toEqual(['Home', 'Catalog', 'Back office']);
   });
 });
 
@@ -154,16 +137,35 @@ describe('header', () => {
   });
 });
 
+const DASH_URL = 'GET /api/v1/admin/dashboard';
+const dash = {
+  body: {
+    data: {
+      generated_at: '2026-11-27T10:15:00Z',
+      week_start: '2026-11-23',
+      currency: 'USD',
+      quotes: { open: 0, awaiting_customer: 0, expiring_soon: 0 },
+      orders: { this_week: 0, pending: 0 },
+      invoices: {
+        overdue_count: 0,
+        overdue_total_cents: 0,
+        due_soon_count: 0,
+        due_soon_total_cents: 0,
+      },
+      products: { inactive: 0 },
+    },
+  },
+};
+
 describe('role guards (403 page)', () => {
-  it('customer on /staff sees Not allowed, never the page or its API call', async () => {
+  it('customer on /staff is sent to /admin and sees Not allowed, never an admin API call', async () => {
     const api = mockApi({ [ME]: meOk(customer) });
     renderApp('/staff');
     expect(
       await screen.findByRole('heading', { name: /not allowed/i }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /staff home/i })).toBeNull();
-    expect(api.to('GET /api/v1/staff/ping')).toHaveLength(0);
-    expect(loc()).toHaveTextContent('/staff');
+    expect(api.to(DASH_URL)).toHaveLength(0);
+    expect(loc()).toHaveTextContent('/admin');
   });
 
   it('customer on /admin sees Not allowed', async () => {
@@ -172,61 +174,38 @@ describe('role guards (403 page)', () => {
     expect(
       await screen.findByRole('heading', { name: /not allowed/i }),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { name: /admin area/i })).toBeNull();
+    expect(screen.queryByRole('heading', { name: /dashboard/i })).toBeNull();
   });
 
-  it('staff on /admin sees Not allowed but can open /staff', async () => {
-    mockApi({
-      [ME]: meOk(staff),
-      'GET /api/v1/staff/ping': { body: { status: 'ok' } },
-    });
-    renderApp('/admin');
-    expect(
-      await screen.findByRole('heading', { name: /not allowed/i }),
-    ).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('link', { name: 'Staff area' }));
-    expect(
-      await screen.findByRole('heading', { name: /staff home/i }),
-    ).toBeInTheDocument();
-  });
-
-  it('admin can open /admin and /staff', async () => {
-    mockApi({
-      [ME]: meOk(admin),
-      'GET /api/v1/staff/ping': { body: { status: 'ok' } },
-      'GET /api/v1/admin/ping': { body: { status: 'ok' } },
-    });
-    renderApp('/admin');
-    expect(
-      await screen.findByRole('heading', { name: /admin area/i }),
-    ).toBeInTheDocument();
-    expect(await screen.findByText(/admin api: ok/i)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('link', { name: 'Staff area' }));
-    expect(
-      await screen.findByRole('heading', { name: /staff home/i }),
-    ).toBeInTheDocument();
-  });
-
-  it('shows an error state when the staff ping fails with 500', async () => {
-    mockApi({
-      [ME]: meOk(staff),
-      'GET /api/v1/staff/ping': { status: 500, body: {} },
-    });
+  it.each([
+    ['staff', staff],
+    ['admin', admin],
+  ])('%s can open /admin and /staff redirects there', async (_n, who) => {
+    mockApi({ [ME]: meOk(who), [DASH_URL]: dash });
     renderApp('/staff');
+    expect(
+      await screen.findByRole('heading', { name: /dashboard/i }),
+    ).toBeInTheDocument();
+    expect(loc()).toHaveTextContent(/^\/admin$/);
+  });
+
+  it('shows an error state when the dashboard fails with 500', async () => {
+    mockApi({ [ME]: meOk(staff), [DASH_URL]: { status: 500, body: {} } });
+    renderApp('/admin');
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      /could not load/i,
+      /something went wrong/i,
     );
   });
 });
 
 describe('session handling', () => {
   it('a 401 on a later API call clears auth and goes to /login?next=', async () => {
-    mockApi({ [ME]: meOk(staff), 'GET /api/v1/staff/ping': guest });
-    renderApp('/staff');
+    mockApi({ [ME]: meOk(staff), [DASH_URL]: guest });
+    renderApp('/admin');
     await screen.findByLabelText('Email');
     const url = new URL(loc().textContent!, 'http://x');
     expect(url.pathname).toBe('/login');
-    expect(url.searchParams.get('next')).toBe('/staff');
+    expect(url.searchParams.get('next')).toBe('/admin');
   });
 
   it('logout posts, refreshes csrf, goes to /login and re-guards', async () => {

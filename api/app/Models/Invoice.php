@@ -126,7 +126,10 @@ class Invoice extends Model
             }))
             ->when($c['from'], fn ($q, $d) => $q->where('invoices.issue_date', '>=', $d))
             ->when($c['to'], fn ($q, $d) => $q->where('invoices.issue_date', '<=', $d))
-            ->when($c['company_id'], fn ($q, $id) => $q->where('invoices.company_id', $id));
+            ->when($c['company_id'], fn ($q, $id) => $q->where('invoices.company_id', $id))
+            // Effectively open (not yet overdue) and due today or within the next N days; 0 is a real value, so no when().
+            ->when(isset($c['due_within_days']), fn ($q) => $q->where('invoices.status', 'open')
+                ->whereBetween('invoices.due_date', [$today, now()->utc()->addDays($c['due_within_days'])->toDateString()]));
 
         if ($c['q'] !== null) {
             // Invoice and order number without dashes (normalised, never a LIKE pattern) OR PO reference (case-insensitive,

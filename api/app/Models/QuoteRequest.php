@@ -116,7 +116,10 @@ class QuoteRequest extends Model
             }))
             ->when($c['from'], fn ($q, $d) => $q->where('quote_requests.created_at', '>=', Carbon::parse($d, 'UTC')->startOfDay()))
             ->when($c['to'], fn ($q, $d) => $q->where('quote_requests.created_at', '<', Carbon::parse($d, 'UTC')->addDay()->startOfDay()))
-            ->when($c['company_id'], fn ($q, $id) => $q->where('quote_requests.company_id', $id));
+            ->when($c['company_id'], fn ($q, $id) => $q->where('quote_requests.company_id', $id))
+            // Stored status quoted and valid today or within the next N days: the "expiring soon" queue.
+            ->when($c['expiring_within_days'] ?? null, fn ($q, $days) => $q->where('quote_requests.status', 'quoted')
+                ->whereBetween('quote_requests.valid_until', [$today, now()->utc()->addDays($days)->toDateString()]));
 
         if ($c['q'] !== null) {
             // Quote number without dashes (normalised, never a LIKE pattern) OR PO reference (case-insensitive,

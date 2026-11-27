@@ -99,6 +99,14 @@ return [
             'expire' => 60,
             'throttle' => 60,
         ],
+
+        // Invitations: a second broker with its own table, so a 7-day invitation token never works as a 60-minute reset token and vice versa.
+        'invitations' => [
+            'provider' => 'users',
+            'table' => 'user_invitation_tokens',
+            'expire' => (int) env('INVITATION_EXPIRE_MINUTES', 10080),
+            'throttle' => 60,
+        ],
     ],
 
     /*

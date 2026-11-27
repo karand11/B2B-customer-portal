@@ -51,7 +51,7 @@ function splitError(e: unknown, fields: readonly string[]) {
  * Confirm dialog around a React Hook Form form. A ref guard makes a double
  * click send once; the dialog stays open on an error so the message can be read.
  */
-function FormDialog<V extends FieldValues>({
+export function FormDialog<V extends FieldValues>({
   title,
   confirmLabel,
   cancelLabel = 'Cancel',
@@ -232,9 +232,11 @@ export function VoidDialog({
 
 function CreateInvoiceDialog({
   order,
+  basePath,
   onClose,
 }: {
   order: OrderDetail;
+  basePath: string;
   onClose: () => void;
 }) {
   const create = useCreateInvoice(order.number);
@@ -260,7 +262,7 @@ function CreateInvoiceDialog({
         const res = await create.mutateAsync(
           v.due_date ? { due_date: v.due_date } : {},
         );
-        navigate(`/invoices/${res.data.id}`);
+        navigate(`${basePath}/invoices/${res.data.id}`);
       }}
     >
       <p className="mb-3 text-sm">
@@ -285,7 +287,13 @@ function CreateInvoiceDialog({
 }
 
 /** Staff button on the order page. The server decides `can_invoice`; hiding is only UX. */
-export function CreateInvoiceButton({ order }: { order: OrderDetail }) {
+export function CreateInvoiceButton({
+  order,
+  basePath = '',
+}: {
+  order: OrderDetail;
+  basePath?: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="mt-4">
@@ -297,7 +305,11 @@ export function CreateInvoiceButton({ order }: { order: OrderDetail }) {
         Create invoice
       </button>
       {open && (
-        <CreateInvoiceDialog order={order} onClose={() => setOpen(false)} />
+        <CreateInvoiceDialog
+          order={order}
+          basePath={basePath}
+          onClose={() => setOpen(false)}
+        />
       )}
     </div>
   );

@@ -80,7 +80,8 @@ it('runs the demo seeder in local and testing', function (string $env) {
 
     app(DatabaseSeeder::class)->run();
 
-    expect(User::count())->toBe(5);
+    // 5 demo users plus the 4 of AdminDemoSeeder (second admin and staff, an inactive customer, a pending invitation).
+    expect(User::count())->toBe(9);
 })->with(['local', 'testing']);
 
 it('enforces the company foreign key and RESTRICT on delete', function () {

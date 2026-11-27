@@ -1,1 +1,2 @@
 CREATE DATABASE portal_test;
+CREATE DATABASE portal_e2e;

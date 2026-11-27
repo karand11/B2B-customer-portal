@@ -19,12 +19,12 @@ const th = 'px-3 py-2 text-left text-sm font-semibold';
 const td = 'px-3 py-2 text-sm';
 const btn = 'rounded border border-slate-600 px-3 py-1';
 
-function InvoiceNotFound() {
+function InvoiceNotFound({ basePath }: { basePath: string }) {
   return (
     <section>
       <h1 className="mb-2 text-2xl font-semibold">Invoice not found</h1>
       <p className="mb-2">This invoice does not exist or you cannot view it.</p>
-      <Link to="/invoices" className="text-blue-800 underline">
+      <Link to={`${basePath}/invoices`} className="text-blue-800 underline">
         Back to invoices
       </Link>
     </section>
@@ -109,7 +109,7 @@ function Totals({ inv }: { inv: InvoiceDetail }) {
   );
 }
 
-function Detail({ inv }: { inv: InvoiceDetail }) {
+function Detail({ inv, basePath }: { inv: InvoiceDetail; basePath: string }) {
   const { user } = useAuth();
   const [dialog, setDialog] = useState<'pay' | 'void' | null>(null);
   const [notice, setNotice] = useState('');
@@ -126,7 +126,7 @@ function Detail({ inv }: { inv: InvoiceDetail }) {
   const bank = seller.bank;
   return (
     <section>
-      <Link to="/invoices" className="text-blue-800 underline">
+      <Link to={`${basePath}/invoices`} className="text-blue-800 underline">
         Back to invoices
       </Link>
       <h1
@@ -213,7 +213,7 @@ function Detail({ inv }: { inv: InvoiceDetail }) {
         <dt className="font-semibold">Order</dt>
         <dd>
           <Link
-            to={`/orders/${inv.order_number}`}
+            to={`${basePath}/orders/${inv.order_number}`}
             className="text-blue-800 underline"
           >
             Order {inv.order_number}
@@ -305,14 +305,18 @@ function Detail({ inv }: { inv: InvoiceDetail }) {
   );
 }
 
-export default function InvoiceDetailPage() {
+export default function InvoiceDetailPage({
+  basePath = '',
+}: {
+  basePath?: string;
+}) {
   const { id = '' } = useParams();
   const valid = ID_RE.test(id);
   const q = useInvoice(id, valid);
 
-  if (!valid) return <InvoiceNotFound />;
+  if (!valid) return <InvoiceNotFound basePath={basePath} />;
   if (q.error instanceof ApiError && q.error.status === 404)
-    return <InvoiceNotFound />;
+    return <InvoiceNotFound basePath={basePath} />;
   if (q.isError && !q.data)
     return <CatalogError error={q.error} onRetry={() => void q.refetch()} />;
   if (!q.data)
@@ -322,5 +326,5 @@ export default function InvoiceDetailPage() {
         <div className="h-32 animate-pulse rounded bg-slate-200" />
       </div>
     );
-  return <Detail inv={q.data} />;
+  return <Detail inv={q.data} basePath={basePath} />;
 }

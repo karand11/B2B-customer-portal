@@ -19,7 +19,7 @@ class QuotePricing
      */
     public function save(QuoteRequest $quote, User $actor, array $lines, bool $setValidUntil, ?string $validUntil): QuoteRequest
     {
-        return $this->workflow->run($quote, 'price', $actor, function (QuoteRequest $locked) use ($lines, $setValidUntil, $validUntil) {
+        return $this->workflow->run($quote, 'price', $actor, function (QuoteRequest $locked) use ($actor, $lines, $setValidUntil, $validUntil) {
             $items = $locked->items()->get()->keyBy('position');
 
             $problems = [];
@@ -30,14 +30,22 @@ class QuotePricing
                 throw ValidationException::withMessages($problems);
             }
 
+            $before = $this->terms($locked);
+            $changed = 0;
             foreach ($lines as $line) {
                 $item = $items[$line['position']];
                 $price = $line['unit_price_cents'];
+                $changed += $item->unit_price_cents === $price ? 0 : 1;
                 $item->forceFill(['unit_price_cents' => $price, 'line_total_cents' => $price === null ? null : $price * $item->quantity])->save();
             }
 
             $setValidUntil && $locked->forceFill(['valid_until' => $validUntil]);
             $this->totals($locked, $items);
+
+            AuditLog::record(
+                'quote.priced', 'quote', $locked->quote_number, $locked->quote_number, $actor,
+                $before, $this->terms($locked), $changed > 0 ? ['lines_changed' => $changed] : [], $locked->company_id,
+            );
         });
     }
 
@@ -65,6 +73,12 @@ class QuotePricing
         $this->notifier->sent($sent->load(['createdBy', 'items']));
 
         return $sent;
+    }
+
+    /** @return array<string, mixed> what a draft save can change, for the audit row */
+    private function terms(QuoteRequest $quote): array
+    {
+        return ['subtotal_cents' => $quote->subtotal_cents, 'total_cents' => $quote->total_cents, 'valid_until' => $quote->valid_until?->toDateString()];
     }
 
     /** subtotal and total only when EVERY line is priced; tax and shipping stay 0. */

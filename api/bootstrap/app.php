@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureUserIsActive;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
@@ -26,9 +27,11 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->throttleApi();
         // Also covers GET /sanctum/csrf-cookie (web group) with the same 60/min limiter.
         $middleware->web(append: ['throttle:api']);
-        $middleware->alias(['role' => RoleMiddleware::class]);
-        // A wrong role is a 403 before any rate limiter (api, orders-create) counts the request or any lookup runs.
-        $middleware->appendToPriorityList(after: AuthenticatesRequests::class, append: RoleMiddleware::class);
+        $middleware->alias(['role' => RoleMiddleware::class, 'active' => EnsureUserIsActive::class]);
+        // Order: authenticate, active (deactivated or stale session = 401), role (wrong role = 403), then the framework default
+        // (rate limiters, route model binding), so a wrong role never counts against a limiter and no lookup runs before the role check.
+        $middleware->appendToPriorityList(after: AuthenticatesRequests::class, append: EnsureUserIsActive::class);
+        $middleware->appendToPriorityList(after: EnsureUserIsActive::class, append: RoleMiddleware::class);
     })
     ->withExceptions(function (Exceptions $exceptions) {
         // Guests get 401 JSON, never a redirect to a non-existent login route.

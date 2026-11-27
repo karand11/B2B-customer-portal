@@ -13,3 +13,6 @@ Schedule::command('quotes:expire')->everyFiveMinutes()->withoutOverlapping();
 
 // Materialises overdue (the API already reports the effective status; this keeps stored data and history tidy).
 Schedule::command('invoices:mark-overdue')->hourly()->withoutOverlapping();
+
+// Expires import previews older than an hour and deletes their files.
+Schedule::command('imports:prune')->hourly()->withoutOverlapping();

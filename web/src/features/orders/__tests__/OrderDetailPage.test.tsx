@@ -34,6 +34,9 @@ describe('order detail', () => {
     setupApp(PATH, { [URL]: detail(confirmed) });
     expect(
       await screen.findByRole('heading', { name: /Order ORD-K7Q2M-X9PA3/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole('region', { name: 'Order summary' }),
     ).toHaveTextContent('Confirmed');
     const t = screen.getByRole('table', { name: 'Prices as ordered' });
     expect(
@@ -149,7 +152,7 @@ describe('order detail', () => {
       ).toBe(true),
     );
     expect(
-      screen.getByRole('heading', { name: /Order ORD/ }),
+      screen.getByRole('region', { name: 'Order summary' }),
     ).toHaveTextContent('Cancelled');
     expect(screen.queryByRole('button', { name: 'Cancel order' })).toBeNull();
     expect(api.to('POST /api/v1/orders/ORD-K7Q2M-X9PA3/cancel')).toHaveLength(
@@ -245,9 +248,14 @@ describe('order detail', () => {
       expect(
         screen.getByText(/for Northwind Machinery Ltd/),
       ).toBeInTheDocument();
+      // Staff get the status controls (from allowed_transitions), never the customer actions.
       expect(
-        screen.queryByRole('button', { name: /cancel|re-order/i }),
-      ).toBeNull();
+        screen.getByRole('button', { name: 'Mark as confirmed' }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: 'Cancel order' }),
+      ).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /re-order/i })).toBeNull();
       expect(api.to(CART)).toHaveLength(0);
     },
   );
