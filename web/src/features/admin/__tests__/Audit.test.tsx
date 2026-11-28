@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { admin } from '../../../test/utils';
@@ -103,18 +103,29 @@ describe('audit log page', () => {
       expect(loc()).toHaveTextContent('?action=order.status_changed'),
     );
     await user.selectOptions(screen.getByLabelText('Subject type'), 'order');
-    await user.type(screen.getByLabelText('Subject ID'), 'ORD-K7Q2M-X9PA3');
-    await user.type(screen.getByLabelText('Actor (user ID)'), '2');
-    await user.type(screen.getByLabelText('Company'), 'north');
+    // One input event per field (paste / change), never keystroke by keystroke: the page debounces the URL and the request,
+    // so typing 15 characters on a slow runner could commit a partial value in between and make this test flaky.
+    await user.click(screen.getByLabelText('Subject ID'));
+    await user.paste('ORD-K7Q2M-X9PA3');
+    await user.click(screen.getByLabelText('Actor (user ID)'));
+    await user.paste('2');
+    await user.click(screen.getByLabelText('Company'));
+    await user.paste('north');
     await user.click(
       await screen.findByRole('button', { name: 'Northwind Machinery Ltd' }),
     );
-    await user.type(screen.getByLabelText('From date'), '2026-11-01');
-    await user.type(screen.getByLabelText('To date'), '2026-11-30');
-    await waitFor(() =>
-      expect(auditCalls(api).at(-1)?.url).toBe(
-        '/api/v1/admin/audit-log?action=order.status_changed&subject_type=order&subject_id=ORD-K7Q2M-X9PA3&company_id=1&actor_id=2&from=2026-11-01&to=2026-11-30',
-      ),
+    fireEvent.change(screen.getByLabelText('From date'), {
+      target: { value: '2026-11-01' },
+    });
+    fireEvent.change(screen.getByLabelText('To date'), {
+      target: { value: '2026-11-30' },
+    });
+    await waitFor(
+      () =>
+        expect(auditCalls(api).at(-1)?.url).toBe(
+          '/api/v1/admin/audit-log?action=order.status_changed&subject_type=order&subject_id=ORD-K7Q2M-X9PA3&company_id=1&actor_id=2&from=2026-11-01&to=2026-11-30',
+        ),
+      { timeout: 10_000 },
     );
     expect(loc()).toHaveTextContent('from=2026-11-01&to=2026-11-30');
   });

@@ -32,13 +32,13 @@ trap cleanup EXIT
 fail() { echo "FAIL: $*"; status=1; }
 
 echo "== 1. backup of $SOURCE_DB"
-PGDATABASE="$SOURCE_DB" OUT_DIR="$work/out" STORAGE_DIR="$STORAGE_DIR" "$ROOT/ops/backup/backup.sh" >"$work/backup.log" 2>&1 || { cat "$work/backup.log"; die "backup failed"; }
+PGDATABASE="$SOURCE_DB" OUT_DIR="$work/out" STORAGE_DIR="$STORAGE_DIR" bash "$ROOT/ops/backup/backup.sh" >"$work/backup.log" 2>&1 || { cat "$work/backup.log"; die "backup failed"; }
 dump="$(ls "$work"/out/*.dump)"; archive="$(ls "$work"/out/*-files.tar.gz)"
 ( cd "$work/out" && sha256sum -c ./*.sha256 >/dev/null ) || die "checksum of the backup does not verify"
 echo "   $(basename "$dump") ($(wc -c < "$dump") bytes), checksums ok"
 
 echo "== 2. restore into $scratch"
-"$ROOT/ops/backup/restore.sh" "$dump" "$scratch" >"$work/restore.log" 2>&1 || { cat "$work/restore.log"; die "restore failed"; }
+bash "$ROOT/ops/backup/restore.sh" "$dump" "$scratch" >"$work/restore.log" 2>&1 || { cat "$work/restore.log"; die "restore failed"; }
 
 echo "== 3. verify"
 fingerprint() { # <db>: one line per table: name|rows|content-hash
