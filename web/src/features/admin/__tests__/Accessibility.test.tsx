@@ -14,10 +14,43 @@ import {
 } from './fixtures';
 
 describe('back office accessibility', () => {
-  it('moves focus to the page heading on arrival', async () => {
+  it('does not move focus on a full page load, so the first Tab reaches the skip link', async () => {
+    const u = userEvent.setup();
     setupAdmin('/admin', { [DASH_URL]: dashOk });
     const h1 = await screen.findByRole('heading', {
       name: 'Dashboard',
+      level: 1,
+    });
+    await screen.findByText('Open quotes');
+    expect(h1).not.toHaveFocus();
+    expect(document.body).toHaveFocus();
+    await u.tab();
+    expect(
+      screen.getByRole('link', { name: 'Skip to main content' }),
+    ).toHaveFocus();
+  });
+
+  it('the import wizard heading does not take focus on a full page load either', async () => {
+    setupAdmin('/admin/products/import');
+    const h1 = await screen.findByRole('heading', { level: 1 });
+    expect(h1).not.toHaveFocus();
+  });
+
+  it('moves focus to the page heading after a client-side navigation', async () => {
+    const u = userEvent.setup();
+    setupAdmin('/admin', {
+      [DASH_URL]: dashOk,
+      [PRODUCTS]: paged([product()]),
+    });
+    await screen.findByText('Open quotes');
+    await u.click(
+      within(screen.getByRole('navigation', { name: 'Back office' })).getByRole(
+        'link',
+        { name: 'Products' },
+      ),
+    );
+    const h1 = await screen.findByRole('heading', {
+      name: 'Products',
       level: 1,
     });
     await waitFor(() => expect(h1).toHaveFocus());

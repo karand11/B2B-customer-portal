@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Admin\UserInvitationController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\CartController;
 use App\Http\Controllers\Api\V1\CategoryController;
+use App\Http\Controllers\Api\V1\HealthReadyController;
 use App\Http\Controllers\Api\V1\InvoiceController;
 use App\Http\Controllers\Api\V1\MeController;
 use App\Http\Controllers\Api\V1\OrderController;
@@ -40,6 +41,8 @@ Route::bind('import', fn (string $id) => ProductImport::where('user_id', request
 
 Route::prefix('v1')->group(function () {
     Route::get('/health', fn () => response()->json(['status' => 'ok']));
+    // Its own bucket (a load balancer probes it every few seconds, from one address): never the guest `api` bucket of the visitors.
+    Route::get('/health/ready', HealthReadyController::class)->withoutMiddleware('throttle:api')->middleware('throttle:health-ready');
 
     Route::prefix('auth')->group(function () {
         Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login-ip');
@@ -105,7 +108,7 @@ Route::prefix('v1')->group(function () {
         });
 
         // /products/filters must be declared before /products/{id}.
-        Route::get('/products', [ProductController::class, 'index']);
+        Route::get('/products', [ProductController::class, 'index'])->middleware('throttle:catalog-search');
         Route::get('/products/filters', [ProductController::class, 'filters']);
         Route::get('/products/{id}', [ProductController::class, 'show'])->where('id', '[0-9]{1,18}');
         Route::get('/categories', [CategoryController::class, 'index']);
@@ -118,10 +121,10 @@ Route::prefix('v1')->group(function () {
             Route::patch('/cart/items/{productId}', [CartController::class, 'update'])->where('productId', '[0-9]{1,18}');
             Route::delete('/cart/items/{productId}', [CartController::class, 'remove'])->where('productId', '[0-9]{1,18}');
             Route::post('/orders', [OrderController::class, 'store'])->middleware('throttle:orders-create');
-            Route::post('/orders/{number}/reorder', [OrderController::class, 'reorder']);
+            Route::post('/orders/{number}/reorder', [OrderController::class, 'reorder'])->middleware('throttle:orders-reorder');
 
             Route::post('/quotes', [QuoteController::class, 'store'])->middleware('throttle:quotes-create');
-            Route::post('/quotes/{number}/accept', [QuoteController::class, 'accept']);
+            Route::post('/quotes/{number}/accept', [QuoteController::class, 'accept'])->middleware('throttle:orders-create');
             Route::post('/quotes/{number}/decline', [QuoteController::class, 'decline']);
         });
 
@@ -145,17 +148,17 @@ Route::prefix('v1')->group(function () {
             ->middleware('role:staff|admin');
 
         Route::middleware('role:customer|staff|admin')->group(function () {
-            Route::get('/orders', [OrderController::class, 'index']);
+            Route::get('/orders', [OrderController::class, 'index'])->middleware('throttle:order-search');
             Route::get('/orders/{number}', [OrderController::class, 'show']);
             Route::post('/orders/{number}/cancel', [OrderController::class, 'cancel']);
 
-            Route::get('/quotes', [QuoteController::class, 'index']);
+            Route::get('/quotes', [QuoteController::class, 'index'])->middleware('throttle:order-search');
             Route::get('/quotes/{number}', [QuoteController::class, 'show']);
             Route::post('/quotes/{number}/attachments', [QuoteAttachmentController::class, 'store'])->middleware(['throttle:quote-uploads', 'throttle:quote-uploads-hourly']);
             Route::get('/quotes/{number}/attachments/{attachment}', [QuoteAttachmentController::class, 'show']);
-            Route::delete('/quotes/{number}/attachments/{attachment}', [QuoteAttachmentController::class, 'destroy']);
+            Route::delete('/quotes/{number}/attachments/{attachment}', [QuoteAttachmentController::class, 'destroy'])->middleware('throttle:quote-attachment-delete');
 
-            Route::get('/invoices', [InvoiceController::class, 'index']);
+            Route::get('/invoices', [InvoiceController::class, 'index'])->middleware('throttle:order-search');
             Route::get('/invoices/{invoice}', [InvoiceController::class, 'show']);
             // Two buckets: 20/min per user and 60/min per IP address. HEAD (answered by every GET route) is refused with 405 in the controller.
             Route::get('/invoices/{invoice}/pdf', [InvoiceController::class, 'pdf'])->middleware(['throttle:invoice-pdf', 'throttle:invoice-pdf-ip']);

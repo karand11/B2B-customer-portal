@@ -9,6 +9,9 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
+// Real second connections and TRUNCATE of the counter table: runs serially, after the parallel step (see Admin/ConcurrencyTest.php).
+pest()->group('race');
+
 beforeEach(function () {
     $this->w = orderWorld();
     $this->w->a->forceFill(['billing_address' => "1 Test Road\nTesttown"])->save();

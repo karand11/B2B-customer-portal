@@ -36,7 +36,7 @@ export default function AddToCart({ product }: Props) {
           type="button"
           disabled
           aria-describedby={`${id}-why`}
-          className="rounded border border-slate-500 px-3 py-1 text-sm opacity-60"
+          className="rounded border border-slate-500 px-3 py-1 text-sm disabled:opacity-60"
         >
           Add to cart
         </button>

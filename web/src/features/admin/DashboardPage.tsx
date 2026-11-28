@@ -44,7 +44,10 @@ export default function DashboardPage() {
         className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4"
       >
         {[0, 1, 2, 3, 4, 5, 6, 7].map((i) => (
-          <div key={i} className="h-24 animate-pulse rounded bg-slate-200" />
+          <div
+            key={i}
+            className="h-24 animate-pulse motion-reduce:animate-none rounded bg-slate-200"
+          />
         ))}
       </div>
     );

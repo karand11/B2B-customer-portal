@@ -1,5 +1,6 @@
 <?php
 
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -71,6 +72,30 @@ return [
             'level' => env('LOG_LEVEL', 'debug'),
             'days' => env('LOG_DAILY_DAYS', 14),
             'replace_placeholders' => true,
+        ],
+
+        // Structured logs for production (docs/phase-7-design.md section 4.1): one JSON object per line. Every record carries `request_id`
+        // (and `user_id` after authentication) from the log Context. NEVER log emails, names, tokens, passwords, bodies, header values or bound SQL values.
+        'daily_json' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/laravel.log'),
+            'level' => env('LOG_LEVEL', 'debug'),
+            'days' => env('LOG_DAILY_DAYS', 14),
+            'formatter' => JsonFormatter::class,
+            'formatter_with' => ['batchMode' => JsonFormatter::BATCH_MODE_NEWLINES, 'appendNewline' => true],
+            'replace_placeholders' => true,
+        ],
+
+        'stderr_json' => [
+            'driver' => 'monolog',
+            'level' => env('LOG_LEVEL', 'debug'),
+            'handler' => StreamHandler::class,
+            'formatter' => JsonFormatter::class,
+            'formatter_with' => ['batchMode' => JsonFormatter::BATCH_MODE_NEWLINES, 'appendNewline' => true],
+            'with' => [
+                'stream' => 'php://stderr',
+            ],
+            'processors' => [PsrLogMessageProcessor::class],
         ],
 
         'slack' => [

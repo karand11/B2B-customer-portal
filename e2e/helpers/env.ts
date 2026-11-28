@@ -60,3 +60,6 @@ export const API_ENV: Record<string, string> = {
   // Not supported on Windows; Linux CI benefits (the SPA fires parallel requests).
   ...(process.platform === 'win32' ? {} : { PHP_CLI_SERVER_WORKERS: '4' }),
 };
+
+/** E2E_WEB=preview serves the production build with the enforced CSP (see playwright.config.ts). */
+export const IS_PREVIEW = process.env.E2E_WEB === 'preview';

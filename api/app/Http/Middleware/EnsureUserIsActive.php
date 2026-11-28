@@ -6,14 +6,15 @@ use Closure;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Context;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
  * Runs right after authentication on every authenticated route. A user who cannot sign in (deactivated or pending), or whose
  * session was created before the last deactivation, reactivation, role/company change or invitation acceptance, is logged out and gets 401.
  * Costs no query: the user is already loaded and the epoch is a column on it. A session without a stored epoch counts as stale.
- * A request WITHOUT a session cannot have been authenticated by a cookie (there is no token login in this app), so there is no epoch to compare:
- * only the sign-in state applies to it.
+ * FAIL CLOSED: an authenticated user on a request WITHOUT a session has no epoch to compare, and there is no token login in this app,
+ * so that request is refused (401) instead of waved through.
  */
 class EnsureUserIsActive
 {
@@ -28,11 +29,14 @@ class EnsureUserIsActive
             throw new AuthenticationException;
         }
 
+        // The integer id only: never an email or a name in a log line.
+        $user === null || Context::add('user_id', $user->id);
+
         return $next($request);
     }
 
     private function epochMatches(Request $request, int $epoch): bool
     {
-        return ! $request->hasSession() || $request->session()->get('session_epoch') === $epoch;
+        return $request->hasSession() && $request->session()->get('session_epoch') === $epoch;
     }
 }

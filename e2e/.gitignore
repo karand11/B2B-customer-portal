@@ -3,3 +3,4 @@ test-results
 playwright-report
 .auth
 .data
+a11y-reports

@@ -13,6 +13,7 @@ use Illuminate\Foundation\Http\Middleware\ValidateCsrfToken;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
+use Tests\Support\ProductionConfig;
 
 beforeEach(function () {
     $this->w = orderWorld();
@@ -118,7 +119,10 @@ it('snapshots rate, tax, seller, buyer and lines: later edits change nothing, ne
 
     config(['invoicing.vat_rate_bp' => 500, 'invoicing.seller.name' => 'Changed Seller AG', 'invoicing.vat_label' => 'GST']);
     $product->forceFill(['price_cents' => 9999, 'name' => 'Renamed'])->save();
+    // order_items are append-only in the database (Phase 7 trigger): lift it for this one test to prove the INVOICE snapshot does not read the order lines again.
+    DB::statement('ALTER TABLE order_items DISABLE TRIGGER order_items_append_only');
     DB::table('order_items')->where('order_id', $order->id)->update(['name' => 'Edited line', 'unit_price_cents' => 1, 'line_total_cents' => 4]);
+    DB::statement('ALTER TABLE order_items ENABLE TRIGGER order_items_append_only');
     $this->w->a->forceFill(['name' => 'Renamed Company', 'billing_address' => 'Elsewhere 1', 'tax_id' => 'NEW'])->save();
 
     $after = $this->actingAs($this->w->staff)->getJson("/api/v1/invoices/{$id}")->assertOk()->json('data');
@@ -235,13 +239,13 @@ it('fails loudly and writes nothing when an order line total does not add up to 
 it('answers a malformed JSON body with 422 on body', function (string $raw) {
     $order = orderWith($this->w->a, [[1000, 1]]);
 
-    $this->actingAs($this->w->staff)->call('POST', "/api/v1/orders/{$order->order_number}/invoice", [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'], $raw)
+    $this->actingAs($this->w->staff)->call('POST', "/api/v1/orders/{$order->order_number}/invoice", [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ORIGIN' => 'http://localhost:5173'], $raw)
         ->assertUnprocessable()->assertJsonValidationErrors('body');
     expectNothingIssued();
 })->with(['{"due_date": ', 'not json', '5', '"x"', 'null']);
 
 it('accepts an empty body, {} and []', function () {
-    $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'];
+    $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ORIGIN' => 'http://localhost:5173'];
     $this->actingAs($this->w->staff);
 
     foreach (['', '{}', '[]'] as $raw) {
@@ -306,7 +310,7 @@ it('refuses the placeholder seller name in production only', function () {
 
     // CSRF is only skipped when the environment is "testing"; this test flips it, so skip the middleware instead.
     $this->withoutMiddleware(ValidateCsrfToken::class);
-    app()->detectEnvironment(fn () => 'production');
+    ProductionConfig::applyForTestClient('production');
     issueInvoiceAs($this->w->staff, orderWith($this->w->a, [[1000, 1]]))->assertUnprocessable()->assertJsonValidationErrors('invoice');
     expect(Invoice::count())->toBe(1);
 

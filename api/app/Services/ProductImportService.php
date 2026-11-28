@@ -93,7 +93,7 @@ class ProductImportService
             rewind($stream);
 
             try {
-                $report = $this->importer->run($stream, false, config('admin.imports.max_rows'));
+                $report = $this->importer->run($stream, false, config('admin.imports.max_rows'), true);
             } catch (ImportFatal $e) {
                 $this->refuse('import', $e->getMessage());
             } finally {
@@ -116,6 +116,10 @@ class ProductImportService
                     'bad_rows' => $report->bad, 'applied_rows' => $report->created + $report->updated, 'skipped_rows' => $report->bad,
                 ],
             );
+
+            // One row per UPDATED product with a real difference (created products are in the aggregate row above). Same transaction:
+            // a failing audit write rolls the whole import back.
+            AuditLog::recordMany('product.import_updated', 'product', $report->changes, $user, ['import_id' => $import->id, 'file_name' => $import->original_name]);
 
             return $import;
         });

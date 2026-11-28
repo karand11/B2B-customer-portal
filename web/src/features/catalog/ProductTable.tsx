@@ -13,7 +13,10 @@ export function SkeletonRows() {
   return (
     <div aria-busy="true" role="status" aria-label="Loading products">
       {Array.from({ length: 6 }, (_, i) => (
-        <div key={i} className="mb-2 h-8 animate-pulse rounded bg-slate-200" />
+        <div
+          key={i}
+          className="mb-2 h-8 animate-pulse motion-reduce:animate-none rounded bg-slate-200"
+        />
       ))}
     </div>
   );
@@ -32,7 +35,7 @@ export default function ProductTable({
 }) {
   const canOrder = useAuth().user?.role === 'customer';
   return (
-    <div className={busy ? 'opacity-60' : undefined} aria-busy={busy}>
+    <div className={busy ? 'opacity-80' : undefined} aria-busy={busy}>
       <table className="w-full border-collapse">
         <caption className="sr-only">Product search results</caption>
         <thead className="max-md:sr-only">

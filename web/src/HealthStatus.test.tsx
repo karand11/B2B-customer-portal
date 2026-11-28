@@ -26,7 +26,18 @@ describe('HealthStatus', () => {
   it('shows a loading state while the request is pending', () => {
     mockFetch(() => new Promise(() => {}));
     renderIt();
-    expect(screen.getByRole('status')).toHaveTextContent(/checking/i);
+    expect(screen.getByText(/checking/i)).toBeInTheDocument();
+  });
+
+  it('does not announce the pending or ok text (no live region), only a failure', async () => {
+    mockFetch(() => Promise.resolve(Response.json({ status: 'ok' })));
+    renderIt();
+    expect(screen.getByText(/checking/i)).not.toHaveAttribute('role');
+    const ok = await screen.findByText('API status: ok');
+    expect(ok).not.toHaveAttribute('role');
+    expect(ok).not.toHaveAttribute('aria-live');
+    expect(screen.queryByRole('status')).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
   });
 
   it('shows "API status: ok" on success and calls /api/v1/health', async () => {

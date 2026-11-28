@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useRef, useState } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -259,8 +260,8 @@ export default function CompanyDetailPage() {
   if (!c)
     return (
       <div role="status" aria-busy="true" aria-label="Loading company">
-        <div className="mb-2 h-8 w-1/2 animate-pulse rounded bg-slate-200" />
-        <div className="h-32 animate-pulse rounded bg-slate-200" />
+        <div className="mb-2 h-8 w-1/2 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
+        <div className="h-32 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
       </div>
     );
 
@@ -317,36 +318,38 @@ export default function CompanyDetailPage() {
         {c.users.length === 0 ? (
           <p>No users in this company.</p>
         ) : (
-          <table className="w-full border-collapse">
-            <caption className="sr-only">Users of {c.name}</caption>
-            <thead>
-              <tr className="border-b border-slate-400 bg-slate-100">
-                {['Name', 'Email', 'Role', 'Status'].map((h) => (
-                  <th key={h} scope="col" className={th}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {c.users.map((u) => (
-                <tr key={u.id} className="border-b border-slate-300">
-                  <td className={td}>
-                    {isAdmin ? (
-                      <Link to={`/admin/users/${u.id}`} className={linkCls}>
-                        {u.name}
-                      </Link>
-                    ) : (
-                      u.name
-                    )}
-                  </td>
-                  <td className={td}>{u.email}</td>
-                  <td className={td}>{u.role}</td>
-                  <td className={td}>{u.status}</td>
+          <ScrollRegion label="Company users table">
+            <table className="w-full border-collapse">
+              <caption className="sr-only">Users of {c.name}</caption>
+              <thead>
+                <tr className="border-b border-slate-400 bg-slate-100">
+                  {['Name', 'Email', 'Role', 'Status'].map((h) => (
+                    <th key={h} scope="col" className={th}>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {c.users.map((u) => (
+                  <tr key={u.id} className="border-b border-slate-300">
+                    <td className={td}>
+                      {isAdmin ? (
+                        <Link to={`/admin/users/${u.id}`} className={linkCls}>
+                          {u.name}
+                        </Link>
+                      ) : (
+                        u.name
+                      )}
+                    </td>
+                    <td className={td}>{u.email}</td>
+                    <td className={td}>{u.role}</td>
+                    <td className={td}>{u.status}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
         )}
       </section>
 

@@ -55,7 +55,7 @@ it('never answers 500 to hostile bodies on any admin write endpoint', function (
     foreach ($targets as [$method, $uri]) {
         foreach ($bodies as $raw) {
             Cache::flush();
-            $status = $this->actingAs($this->admin)->call($method, $uri, [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'], $raw)->getStatusCode();
+            $status = $this->actingAs($this->admin)->call($method, $uri, [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ORIGIN' => 'http://localhost:5173'], $raw)->getStatusCode();
 
             expect($status)->toBeLessThan(500, "{$method} {$uri} with ".substr($raw, 0, 40));
         }

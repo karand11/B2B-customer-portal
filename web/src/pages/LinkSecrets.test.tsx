@@ -33,8 +33,11 @@ describe.each(pages)('$name: emailed-link secrets', (p) => {
     await screen.findByLabelText('New password');
     await waitFor(() => expect(router.state.location.search).toBe(''));
     expect(router.state.location.pathname).toBe(p.path);
-    expect(screen.getByTestId('loc')).toHaveTextContent(
-      new RegExp(`^${p.path}$`),
+    // The router state changes a render before the DOM probe does: wait for the DOM too.
+    await waitFor(() =>
+      expect(screen.getByTestId('loc')).toHaveTextContent(
+        new RegExp(`^${p.path}$`),
+      ),
     );
     expect(JSON.stringify(router.state.location)).not.toContain('secret');
 

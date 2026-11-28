@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { PER_PAGE, clampPage } from './pageWindow';
 
 /**
  * One URL parameter: `parse` returns undefined for an invalid value (it is dropped),
@@ -32,7 +33,7 @@ export const pageParam: ParamSpec<number> = {
   parse: (raw) => {
     if (raw === null || !/^[1-9]\d{0,4}$/.test(raw)) return undefined;
     const n = Number(raw);
-    return n <= 10_000 ? n : undefined;
+    return n <= 10_000 ? clampPage(n, PER_PAGE.admin) : undefined;
   },
   format: String,
   default: 1,

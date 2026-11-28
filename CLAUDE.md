@@ -5,7 +5,7 @@ Customers: browse catalog, request quotes, see order history, download invoices 
 Staff: manage products, orders, quotes, invoices, customers.
 
 ## Stack and layout
-- Monorepo: `api/` (Laravel 11/12, PHP 8.3), `web/` (React + TypeScript + Vite), `e2e/` (Playwright), `docs/`.
+- Monorepo: `api/` (Laravel 11/12, PHP 8.3), `web/` (React + TypeScript + Vite), `e2e/` (Playwright, a11y and load scripts), `ops/` (backup/restore, DB roles, dependency-audit script, load-test rig), `docs/`.
 - API: REST under `/api/v1`, JSON only, Sanctum SPA cookie auth, spatie/laravel-permission (roles: customer, staff, admin).
 - Frontend: React Router, TanStack Query, React Hook Form + Zod, Tailwind.
 - PDF: barryvdh/laravel-dompdf. Queue: database driver. Mail: Mailpit locally.

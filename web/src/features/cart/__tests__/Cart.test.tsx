@@ -41,10 +41,10 @@ describe('add to cart (catalog list)', () => {
     const live = await screen.findByText('Added 3 x 6205-2RS to your cart');
     expect(live).toHaveAttribute('aria-live', 'polite');
     expect(
-      await screen.findByRole('link', { name: 'Cart, 1 item' }),
-    ).toHaveTextContent('Cart1');
+      await screen.findByRole('link', { name: 'Cart 1 item' }),
+    ).toHaveTextContent('Cart 1');
 
-    await user.click(screen.getByRole('link', { name: 'Cart, 1 item' }));
+    await user.click(screen.getByRole('link', { name: 'Cart 1 item' }));
     const table = await screen.findByRole('table', {
       name: 'Items in your cart',
     });
@@ -345,7 +345,7 @@ describe('cart persistence', () => {
         name: 'Add to cart',
       }),
     );
-    await screen.findByRole('link', { name: 'Cart, 1 item' });
+    await screen.findByRole('link', { name: 'Cart 1 item' });
 
     cleanup(); // the page is gone, the "server" keeps the cart
     const before = api.to(CART).length;
@@ -354,7 +354,7 @@ describe('cart persistence', () => {
     expect(api.to(CART).length).toBeGreaterThan(before);
     expect(screen.getByLabelText('Quantity for 6205-2RS')).toHaveValue('1');
     expect(
-      screen.getByRole('link', { name: 'Cart, 1 item' }),
+      screen.getByRole('link', { name: 'Cart 1 item' }),
     ).toBeInTheDocument();
     expect(setItem).not.toHaveBeenCalled();
     setItem.mockRestore();

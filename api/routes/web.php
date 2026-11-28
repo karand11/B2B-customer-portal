@@ -1,7 +1,3 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
-
-Route::get('/', function () {
-    return view('welcome');
-});
+// Intentionally empty: the API host serves no web pages (GET / is a plain 404). The SPA is a static site on its own host.

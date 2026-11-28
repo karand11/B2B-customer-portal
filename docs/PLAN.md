@@ -112,13 +112,13 @@ Test gate
 Build: carried over from Phase 1 review: trusted proxies set to the real proxy IPs only (`trustProxies(at: ...)`, never `*`) plus `trustHosts`, `Referrer-Policy: origin` (reset links carry a token in the URL), `SESSION_SECURE_COOKIE=true`, `APP_DEBUG=false`, fail loudly if `APP_URL_WEB` is unset in production, consider `Password::uncompromised()` and a non-queued or encrypted reset notification. From the Phase 2 review: re-measure catalog search on a production-like server, lower the max `page` or cap deep OFFSET, consider a dedicated search limiter (e.g. 30/min) and stampede protection (`Cache::flexible`/lock) on the filters cache, escape leading `= + - @` in any CSV/XLSX export. From the Phase 3 review: send an expected subtotal with checkout (or confirm price changes) so a price change between viewing and placing is never silent, dedicated limiters for reorder and order search, trigram index on `orders.po_reference` if volume grows, require `APP_DEBUG=false` and `SESSION_SECURE_COOKIE=true` in every deployed environment. From the Phase 4 review: staff purge of attachments on closed quotes and a CSV warning in the staff UI, malware scanning of uploads, one-byte text files refused by libmagic (document or relax), dedicated email layout without the API-origin header link, per-user/company storage monitoring. From the Phase 5 review: run the app database role without ownership/TRIGGER/TRUNCATE privileges on the invoice tables, cache generated PDFs per (invoice, status, updated_at) or cap concurrent renders if PDF load grows, LGPL notice for dompdf libraries if the app is ever distributed, have the legal wording, VAT rate and numbering format reviewed. Then: security headers, CORS locked to portal origin, CSRF for SPA, rate limits (login/search/PDF), upload hardening, route authorization audit, `EXPLAIN` review of indexes, caching of filter options, accessibility pass, error tracking, structured logging, backup plan.
 
 Test gate
-- [ ] Pest: route-audit test (every non-public route has auth; every `/admin` route has a role)
-- [ ] Pest: IDOR tests across two companies for orders, quotes, invoices, attachments, PDFs
-- [ ] Pest: rate limits return 429; mass-assignment of `role`/`company_id` ignored
-- [ ] `composer audit` and `npm audit`: no high/critical issues
-- [ ] Lighthouse accessibility 90+ on login, catalog, order history
-- [ ] Playwright: full customer journey and full staff journey pass
-- [ ] Load check: catalog search p95 under 500 ms at 50 concurrent users
+- [x] Pest: route-audit test (every non-public route has auth; every `/admin` route has a role)
+- [x] Pest: IDOR tests across two companies for orders, quotes, invoices, attachments, PDFs
+- [x] Pest: rate limits return 429; mass-assignment of `role`/`company_id` ignored
+- [x] `composer audit` and `npm audit`: no high/critical issues
+- [x] Lighthouse accessibility 90+ on login, catalog, order history
+- [x] Playwright: full customer journey and full staff journey pass
+- [x] Load check: catalog search p95 under 500 ms at 50 concurrent users
 
 ## Phase 8 - Deployment and go-live
 Build: production environment (real `INVOICING_*` seller details and VAT rate, PHP memory_limit 256M, hourly scheduler for `invoices:mark-overdue`, writable `storage/fonts`, `APP_DEBUG=false`, log files treated as sensitive; PHP `upload_max_filesize=11M`/`post_max_size=12M`, Nginx `client_max_body_size 12m`, monitored `QUOTES_NOTIFY_ADDRESS` mailbox, scheduler cron for `quotes:expire`, queue worker for mail, backups include the private `storage/app/private/quotes` files together with the database; never run demo seeders; `RolesSeeder` and `CategorySeeder` only; deploy checklist: `APP_ENV=production`, `APP_DEBUG=false`; the migration role needs CREATE on the database for `pg_trgm`, verify on managed Postgres in staging), Nginx + PHP-FPM, HTTPS, secrets outside git, queue worker (Supervisor), scheduler cron, automated DB backups with tested restore, CD workflow, staging with realistic data, user guides, real catalog data, launch checklist, `docs/DEPLOY.md`.

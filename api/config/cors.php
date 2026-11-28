@@ -29,7 +29,7 @@ return [
 
     'allowed_headers' => ['Accept', 'Content-Type', 'X-Requested-With', 'X-XSRF-TOKEN'],
 
-    'exposed_headers' => ['Retry-After'],
+    'exposed_headers' => ['Retry-After', 'X-Request-Id'],
 
     'max_age' => 600,
 

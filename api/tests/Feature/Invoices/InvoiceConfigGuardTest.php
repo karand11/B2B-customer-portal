@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
+use Tests\Support\ProductionConfig;
 
 beforeEach(function () {
     $this->w = orderWorld();
@@ -32,7 +33,8 @@ function realSeller(): array
 
 function inEnv(string $env): void
 {
-    app()->detectEnvironment(fn () => $env);
+    // Phase 7: production and staging also refuse every request while the configuration is unsafe, so flip them with a safe configuration.
+    in_array($env, ['production', 'staging'], true) ? ProductionConfig::applyForTestClient($env) : app()->detectEnvironment(fn () => $env);
 }
 
 function expectRefusedAndNothingWritten(object $test): void

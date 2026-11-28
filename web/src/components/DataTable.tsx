@@ -1,5 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import ScrollRegion from './ScrollRegion';
 import CatalogError from '../features/catalog/CatalogError';
+import { WINDOW_MESSAGE, atWindowEnd } from '../lib/pageWindow';
 
 export interface Column<T> {
   key: string;
@@ -30,6 +32,7 @@ export default function DataTable<T>({
   onSortChange,
   page,
   lastPage,
+  perPage,
   total,
   onPageChange,
   isLoading,
@@ -50,6 +53,8 @@ export default function DataTable<T>({
   onSortChange: (sort: string) => void;
   page: number;
   lastPage: number;
+  /** From the response meta; enables the 10,000 result window clamp. */
+  perPage?: number;
   total: number | undefined;
   onPageChange: (page: number) => void;
   isLoading: boolean;
@@ -83,6 +88,7 @@ export default function DataTable<T>({
     }
   }, [rows, isPlaceholder]);
 
+  const capped = perPage !== undefined && atWindowEnd(page, perPage, lastPage);
   const go = (p: number) => {
     refocus.current = true;
     onPageChange(p);
@@ -109,7 +115,7 @@ export default function DataTable<T>({
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
-            className="mb-2 h-8 animate-pulse rounded bg-slate-200"
+            className="mb-2 h-8 animate-pulse motion-reduce:animate-none rounded bg-slate-200"
           />
         ))}
       </div>
@@ -133,60 +139,65 @@ export default function DataTable<T>({
     body = (
       <>
         <div
-          className={`overflow-x-auto ${isPlaceholder ? 'opacity-60' : ''}`}
+          className={isPlaceholder ? 'opacity-80' : ''}
           aria-busy={isPlaceholder}
         >
-          <table
-            ref={tableRef}
-            tabIndex={-1}
-            className="w-full border-collapse outline-none"
-          >
-            <caption className="sr-only">{caption}</caption>
-            <thead>
-              <tr className="border-b border-slate-400 bg-slate-100">
-                {columns.map((c) => (
-                  <th
-                    key={c.key}
-                    scope="col"
-                    className={th}
-                    aria-sort={c.sortKey ? ariaSort(c.sortKey) : undefined}
-                  >
-                    {c.sortKey ? (
-                      <button
-                        type="button"
-                        className="font-semibold underline decoration-dotted"
-                        onClick={() => onSortChange(nextSort(c.sortKey!))}
-                      >
-                        {c.header}
-                        <span aria-hidden="true">
-                          {sort === c.sortKey
-                            ? ' ▲'
-                            : sort === `-${c.sortKey}`
-                              ? ' ▼'
-                              : ''}
-                        </span>
-                      </button>
-                    ) : (
-                      c.header
-                    )}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={rowKey(r)} className="border-b border-slate-300">
+          <ScrollRegion label={`${caption} table`}>
+            <table
+              ref={tableRef}
+              tabIndex={-1}
+              className="w-full border-collapse outline-none"
+            >
+              <caption className="sr-only">{caption}</caption>
+              <thead>
+                <tr className="border-b border-slate-400 bg-slate-100">
                   {columns.map((c) => (
-                    <td key={c.key} className={td}>
-                      {c.render(r)}
-                    </td>
+                    <th
+                      key={c.key}
+                      scope="col"
+                      className={th}
+                      aria-sort={c.sortKey ? ariaSort(c.sortKey) : undefined}
+                    >
+                      {c.sortKey ? (
+                        <button
+                          type="button"
+                          className="font-semibold underline decoration-dotted"
+                          onClick={() => onSortChange(nextSort(c.sortKey!))}
+                        >
+                          {c.header}
+                          <span aria-hidden="true">
+                            {sort === c.sortKey
+                              ? ' ▲'
+                              : sort === `-${c.sortKey}`
+                                ? ' ▼'
+                                : ''}
+                          </span>
+                        </button>
+                      ) : (
+                        c.header
+                      )}
+                    </th>
                   ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={rowKey(r)} className="border-b border-slate-300">
+                    {columns.map((c) => (
+                      <td key={c.key} className={td}>
+                        {c.render(r)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
         </div>
-        <nav aria-label="Pagination" className="mt-4 flex items-center gap-4">
+        <nav
+          aria-label="Pagination"
+          className="mt-4 flex flex-wrap items-center gap-4"
+        >
           <button
             type="button"
             className={btn}
@@ -201,11 +212,17 @@ export default function DataTable<T>({
           <button
             type="button"
             className={btn}
-            disabled={page >= lastPage}
+            disabled={page >= lastPage || capped}
+            aria-describedby={capped ? 'page-window-hint' : undefined}
             onClick={() => go(page + 1)}
           >
             Next
           </button>
+          {capped && (
+            <p id="page-window-hint" className="w-full text-sm">
+              {WINDOW_MESSAGE}
+            </p>
+          )}
         </nav>
       </>
     );

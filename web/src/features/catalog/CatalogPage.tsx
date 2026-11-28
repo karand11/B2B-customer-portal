@@ -151,6 +151,7 @@ export default function CatalogPage() {
           <Pagination
             page={list.meta.current_page}
             lastPage={list.meta.last_page}
+            perPage={list.meta.per_page}
             onPage={(page) => {
               update({ page });
               headingRef.current?.focus();
@@ -214,11 +215,11 @@ export default function CatalogPage() {
               <li key={c.label}>
                 <button
                   type="button"
-                  aria-label={`Remove filter ${c.label}`}
                   onClick={() => update(c.patch)}
                   className="rounded-full border border-slate-600 px-3 py-0.5 text-sm"
                 >
-                  {c.label} <span aria-hidden="true">x</span>
+                  {c.label} <span className="sr-only">remove filter</span>{' '}
+                  <span aria-hidden="true">x</span>
                 </button>
               </li>
             ))}

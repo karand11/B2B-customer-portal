@@ -1,0 +1,53 @@
+name: Dependency audit
+
+permissions:
+  contents: read
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 5 * * 1" # weekly: new advisories appear without code changes
+  workflow_dispatch:
+
+concurrency:
+  group: audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: "8.3"
+          tools: composer
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      # `continue-on-error`: the findings are judged by ops/audit/check-audit.mjs (allowlist with expiry), not by the exit code of the audit tools.
+      - name: composer audit
+        working-directory: api
+        run: composer audit --locked --format=json > "$RUNNER_TEMP/composer-audit.json"
+        continue-on-error: true
+      - name: npm audit (web)
+        working-directory: web
+        run: npm audit --json > "$RUNNER_TEMP/web-audit.json"
+        continue-on-error: true
+      - name: npm audit (e2e)
+        working-directory: e2e
+        run: npm audit --json > "$RUNNER_TEMP/e2e-audit.json"
+        continue-on-error: true
+      - name: check-audit self-test
+        run: node ops/audit/check-audit.mjs --self-test
+      - name: Fail on high/critical advisories without a valid allowlist entry
+        run: >
+          node ops/audit/check-audit.mjs
+          --composer "$RUNNER_TEMP/composer-audit.json"
+          --npm "web=$RUNNER_TEMP/web-audit.json"
+          --npm "e2e=$RUNNER_TEMP/e2e-audit.json"
+          --allowlist .audit-allowlist.json

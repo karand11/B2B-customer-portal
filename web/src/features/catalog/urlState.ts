@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PER_PAGE, clampPage } from '../../lib/pageWindow';
 
 export const SORTS = [
   'part_number',
@@ -112,7 +113,7 @@ export function parseQuery(sp: URLSearchParams): CatalogQuery {
     ) as StockStatus[],
     ranges,
     sort: sort.success ? sort.data : null,
-    page: page.success ? page.data : 1,
+    page: page.success ? clampPage(page.data, PER_PAGE.catalog) : 1,
   };
 }
 

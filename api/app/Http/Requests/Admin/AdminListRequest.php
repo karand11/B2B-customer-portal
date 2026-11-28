@@ -2,7 +2,9 @@
 
 namespace App\Http\Requests\Admin;
 
+use App\Http\Requests\Concerns\ChecksPageWindow;
 use Closure;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -12,9 +14,17 @@ use Illuminate\Validation\Rule;
  */
 abstract class AdminListRequest extends FormRequest
 {
+    use ChecksPageWindow;
+
     public function authorize(): bool
     {
         return true;
+    }
+
+    /** @return array<int, Closure> subclasses that add their own checks merge with parent::after() */
+    public function after(): array
+    {
+        return [fn (Validator $validator) => $this->checkPageWindow($validator, 25)];
     }
 
     /** @return list<string> allowed `sort` values */

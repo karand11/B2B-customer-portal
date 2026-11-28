@@ -109,6 +109,8 @@ export const STALE_REVISION =
 export function quoteErrorText(err: unknown): string {
   if (err instanceof ApiError) {
     if (err.status === 413) return 'The file is too large for the server.';
+    if (err.status === 404)
+      return 'This quote or file no longer exists. Reload the page.';
     if (err.status === 422) {
       if (err.errors.revision) return STALE_REVISION;
       const all = [...new Set(Object.values(err.errors).flat())];

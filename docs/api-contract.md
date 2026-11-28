@@ -1642,3 +1642,130 @@ Never stored anywhere in the log: passwords, hashes, tokens, `remember_token`, `
 - Money: `cents / 100` through `Intl.NumberFormat('en-US', { style: 'currency', currency })`, currency from the body (dashboard `currency`). Price inputs accept `^\d{1,7}(\.\d{1,2})?$` up to 10,000,000.00 and are converted to integer cents. All user text (names, addresses, file names, error messages from CSV) is rendered as text nodes, never HTML.
 - Dashboard cards link to the filtered lists: open quotes `/admin/quotes?status=submitted,in_review`, awaiting customer `/admin/quotes?status=quoted`, expiring soon `/admin/quotes?status=quoted&expiring_within_days=7`, pending orders `/admin/orders?status=pending`, orders this week `/admin/orders?from=<week_start>`, overdue invoices `/admin/invoices?status=overdue`, due soon `/admin/invoices?status=open&due_within_days=7`, inactive products `/admin/products?active=false`.
 - E2E hooks (accessible names the Playwright tests rely on, so they are part of the contract): the order detail page has a region named "Order summary" containing the status text, an ordered list named "Status history" (one `listitem` per history entry, text includes the target status label), and, for staff and admin, one button per `allowed_transitions` entry named "Mark as confirmed", "Mark as shipped", "Mark as delivered" or "Cancel order", which opens a dialog whose confirm button is named "Confirm". The back-office navigation is a `nav` named "Back office". The audit page is a table with a caption "Audit log".
+
+---
+
+## Phase 7 - Security, performance and quality pass
+
+Decisions, work packages and test plan: `docs/phase-7-design.md`. This section lists ONLY what changes API behaviour. All Phase 1 to 6 rules apply unchanged unless a bullet below says otherwise. Company scoping is unchanged: no Phase 7 change adds, widens or removes a company boundary; the one new public route returns no company data.
+
+### Response headers (every response of the Laravel app)
+
+Applies to every status code and path handled by Laravel (`/api/*`, `/sanctum/csrf-cookie`, `/up`), error responses and CORS preflights included. Set by a global middleware that wraps all others, so a 401, 404, 405, 413, 419, 422, 429 or 500 carries them too.
+
+| Header | Value | Condition |
+| --- | --- | --- |
+| `X-Content-Type-Options` | `nosniff` | always |
+| `Referrer-Policy` | `origin` | always (never `no-referrer`: see the Phase 6 token-hygiene note) |
+| `X-Frame-Options` | `DENY` | always |
+| `Content-Security-Policy` | `default-src 'none'; frame-ancestors 'none'` | only if the response has none (the attachment download and the invoice PDF download keep their own `default-src 'none'; sandbox`) |
+| `Permissions-Policy` | `accelerometer=(), camera=(), geolocation=(), gyroscope=(), microphone=(), payment=(), usb=()` | always |
+| `Cross-Origin-Resource-Policy` | `same-site` | always |
+| `Cache-Control` | `no-store` | `api/*` and `sanctum/*` unless the response already contains `no-store` (attachments and PDF send `private, no-store`) |
+| `Strict-Transport-Security` | `max-age=31536000` | only when the request is secure (after trusted-proxy resolution) and the production rules apply (every environment except `local`, `testing` and `loadtest`; `APP_ENV` is trimmed and compared case-insensitive, so `prod`, `live` and `Production` get it); no `includeSubDomains`, no `preload`; `PORTAL_HSTS_MAX_AGE=0` disables it |
+| `X-Request-Id` | request id | always (below) |
+| `X-Powered-By` | absent | always |
+
+`X-XSS-Protection` is deliberately not sent.
+
+### Request id
+
+- The server accepts an inbound `X-Request-Id` only if it matches `^[A-Za-z0-9._-]{8,64}$`; otherwise it generates a UUIDv4. The id is returned in the `X-Request-Id` response header (CORS `Access-Control-Expose-Headers` includes it), is attached to every log record of the request and of jobs it queues, and is shown by the SPA on GENERIC error states only (500 and unknown failures, never on 401, 403, 404, 409 or 422) as ` Reference: <id>` appended to the message.
+- Log records contain user id, never email or name (design doc 4.1). Exception messages are logged with email addresses masked as `[email]`; stack traces are logged as frames only (file:line and function, no arguments) with a capped depth; a database error logs only the SQLSTATE and the SQL with placeholders, never bound values.
+
+### Hosts, proxies, CORS
+
+- `TRUSTED_HOSTS` (comma list of host names ONLY: no scheme, port, path, wildcard, IPv6 literal or trailing dot; entries are lower-cased, empty tokens ignored). A request whose `Host` is not in the list is answered `400 {"message":"Bad Request."}` (the host value is never echoed). Required (non-empty) whenever the production rules apply. An invalid list throws `InvalidConfiguration` at boot in every environment (the message names the variable, never the value), except that `php artisan portal:check-config` still boots and reports `TRUSTED_HOSTS` (known small hack: it is detected by `portal:check-config` appearing in `$_SERVER['argv']`).
+- `TRUSTED_PROXIES` (comma list of IPs or CIDRs, empty = trust nobody). `*` and any prefix shorter than /8 (IPv4) or /16 (IPv6) are refused at boot like any unparsable entry (`InvalidConfiguration`, message without the value). Only `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Port` are honoured, and only from a listed peer. Every per-IP limiter and the IPv6 /64 key use the forwarded client address only in that case. Whenever the production rules apply an EMPTY list is UNSAFE (see "Production configuration") unless `TRUSTED_PROXIES_NONE=true` ("clients reach the app directly, no proxy"; honoured only as a real boolean true). Known limit: `TRUSTED_PROXIES_NONE=true` together with a non-empty `TRUSTED_PROXIES` is not flagged; the list wins.
+- A boot-time `InvalidConfiguration` is written with `error_log()` (the logger does not exist yet), so the operator sees the real message.
+- CORS is unchanged in shape: exact allowed origins from `CORS_ALLOWED_ORIGINS`, credentials allowed, methods and headers as today, plus `X-Request-Id` exposed. A foreign or `null` origin never receives `Access-Control-Allow-Origin`. Whenever the production rules apply (every environment except local, testing and loadtest) every allowed origin must be `https` and the SPA origin must be in the list (checked by `php artisan portal:check-config`).
+- CSRF: unchanged (419 `{"message":"CSRF token mismatch."}` for a stateful browser without a valid `X-XSRF-TOKEN` on every non-GET route). A request from a non-stateful origin is a guest request.
+- `GET /` (the framework welcome page on the API host) no longer exists: 404.
+
+### Pagination window (every list endpoint)
+
+Applies to `GET /products`, `GET /orders`, `GET /quotes`, `GET /invoices`, `GET /admin/products`, `GET /admin/companies`, `GET /admin/users`, `GET /admin/audit-log`.
+
+- Rule: `page * per_page` must not exceed `10000` (config `PORTAL_MAX_WINDOW`). Otherwise `422` with the key `page`:
+  ```json
+  { "message": "Only the first 10,000 results can be paged through. Narrow the search with filters.", "errors": { "page": ["Only the first 10,000 results can be paged through. Narrow the search with filters."] } }
+  ```
+- The per-parameter caps stay (`page` at most 1,000,000 on products and 10,000 elsewhere, `per_page` 1 to 100). Inside the window, a page beyond `last_page` is still 200 with `data: []`. `meta.total` and `last_page` still report the real totals; the SPA disables "Next" at the window and shows the hint.
+- Example: `per_page=24` allows pages 1 to 416; `per_page=100` allows pages 1 to 100.
+
+### New and changed rate limits (keyed by user id except `health-ready`; role 403 before 429 unchanged; standard 429 body and `Retry-After`)
+
+| Limiter | Applies to | Limit |
+| --- | --- | --- |
+| `catalog-search` (new) | `GET /products` | 40 per 60 s per user (`PORTAL_CATALOG_SEARCH_PER_MINUTE`), on top of `api` |
+| `order-search` (new) | `GET /orders`, `GET /quotes` and `GET /invoices`, only when `q` is non-empty | 30 per 60 s for customers, 60 per 60 s for staff and admin, ONE shared bucket per user across the three lists (30 searches per minute IN TOTAL, not per list); requests with an empty or absent `q` are not limited and not counted (the limiter returns `Limit::none()`) |
+| `orders-reorder` (new) | `POST /orders/{number}/reorder` | 10 per 60 s, every attempt counts |
+| `quote-attachment-delete` (new) | `DELETE /quotes/{number}/attachments/{attachment}` | 30 per 60 s per user (customer deletes and staff purges share it) |
+| `health-ready` (new) | `GET /health/ready` | 120 per 60 s per client IP, its own bucket; the route does NOT use the guest `api` throttle. Keyed by IP, not user (public route) |
+| `orders-create` (extended) | also `POST /quotes/{number}/accept` | the existing 10 per 60 s, one shared bucket with `POST /orders`, every attempt counts |
+
+`GET /products/filters`, `GET /products/{id}` and `GET /categories` are not covered by `catalog-search` (only `api`). Every other limiter is unchanged.
+
+### POST /api/v1/orders: optional `expected_subtotal_cents`
+
+- New optional body field `expected_subtotal_cents`: integer, 0 to 99,999,999,999,999. Absent or JSON `null` means no check (behaviour exactly as in Phase 3). The SPA always sends the subtotal of the cart it is displaying. A non-integer or negative value is `422 expected_subtotal_cents` (validated with `po_reference`, before the cart is read).
+- Inside the existing transaction under the user lock, after the cart checks: if the value is present and differs from the freshly computed cart subtotal, nothing is created and the response is `409`:
+  ```json
+  {
+    "message": "The prices in your cart changed. Review the cart and place the order again.",
+    "errors": { "expected_subtotal_cents": ["The prices in your cart changed. Review the cart and place the order again."] },
+    "cart": { "...CartResource, exactly the `data` object of GET /cart": "..." }
+  }
+  ```
+- Order of outcomes: 401, 403, 429, 422 `po_reference`/`expected_subtotal_cents`, 422 `cart` (empty or unavailable lines, unchanged), 409, 201. The attempt counts toward `orders-create`. The cart is not changed by a 409. Limitation: two offsetting price changes that leave the subtotal equal are not detected; the order detail always shows the snapshot taken at placement.
+- Frontend: always send the field; on 409 replace the cart data with `cart`, show the new (and old) subtotal in an alert, keep the PO reference the user typed, and require a new click (no automatic resubmit).
+
+### Attachments: staff purge on any quote
+
+- `DELETE /quotes/{number}/attachments/{attachment}`: customers keep the Phase 4 rule (only while `submitted` or `in_review`, only customer-uploaded files they can see, otherwise 422 `status` or 404; customers still get 422 on a quote that is not open). Staff and admin may now delete any attachment of a quote in ANY status (hard delete: row in the transaction, file after commit; a failed file removal is logged and counted by `quotes:storage-check`). 204, 404, 429 and 419 as before; no new 403.
+- EVERY staff or admin purge writes one audit row in the same transaction, on an open quote and on a closed one (`accepted`, `declined`, effective `expired`, or any status outside `submitted`/`in_review`): action `quote.attachment_purged`, subject = the quote, `company_id` = the quote's company, `changes` empty, `metadata` = `{ "file_name": <sanitised display name>, "size_bytes": <int>, "sha256": <hex> }` (no content). A customer deleting their own file is NOT audited, as before. The audit action list and the audit viewer's `action` filter accept the new value.
+- The staff UI shows a warning next to every `.csv` attachment ("CSV files can contain spreadsheet formulas. Open it in a text editor, or disable formulas and links in your spreadsheet."). Customers do not see it.
+
+### Audit log additions
+
+- `product.import_updated` (new action): one row per PRODUCT UPDATED by an applied CSV import whose diff of AUDITED fields is non-empty (written by `AuditLog::recordMany` in chunks of 500 inside the apply transaction). Unchanged rows, rows that change only non-audited fields (for example a description-only change) and CREATED products write no per-product row; created products appear only in the aggregate `product.imported` row, which stays. Subject = the product (`label` = part number), `company_id` null, `changes` = `before`/`after` of the changed fields only (same rules as `product.updated`, including price), `metadata` = `{ "import_id": <uuid>, "file_name": <sanitised> }`. This closes the Phase 6 "known gap" for HTTP imports (at most `ADMIN_IMPORT_MAX_ROWS` = 5,000 rows per import, so the write is bounded). The CLI `products:import` stays unaudited.
+- `quote.attachment_purged` (above).
+- Unchanged: never stored are passwords, tokens, IP addresses, file contents.
+
+### Passwords
+
+- `POST /auth/reset-password` and `POST /auth/accept-invitation`: the new password must also not appear in a known data breach (Have I Been Pwned range API, only the first five characters of the SHA-1 leave the server; the check is skipped when `AUTH_PASSWORD_BREACH_CHECK` is false, which is the default for `local` and `testing`). A breached password is `422` with the key `password` (message not contractual). If the service is unreachable, answers with an error status or is slower than 2 s the check is skipped (fail open) and the warning `Password breach check unavailable` is logged with a `reason` only (never the hash prefix, the hash or the password). Length rules are unchanged (min 10, max 255, confirmation).
+
+### GET /api/v1/health/ready (new, public)
+
+- Auth: none. Scope: none (no company data). Limited by its own `health-ready` bucket (120 per minute per IP); it does not share the guest `api` bucket (60 per minute per IP).
+- Checks: one `SELECT 1` on the default database connection and a short cache read and write.
+- Response 200 `{ "status": "ok" }`. Response 503 `{ "status": "unavailable" }`. The body never names the failing component, a version, a host or an exception; the reason (`Readiness check failed`, check name only) is logged with the request id, at most one line per failing check per minute. Queue workers and the scheduler are NOT part of readiness.
+- `GET /api/v1/health` and `/up` are unchanged (liveness, no database).
+- Route matrix: `GET api/v1/health/ready` is `public` (the public list is now exactly: `health`, `health/ready`, `auth/login`, `auth/forgot-password`, `auth/reset-password`, `auth/accept-invitation`).
+
+### Session behaviour
+
+- Fail-closed: a request with a user but no session is refused. Precisely, a request on which an authenticated user is resolved but that has no session is refused with `401 {"message":"Unauthenticated."}` (the epoch check now fails closed; Phase 6 follow-up). No legitimate client is affected because there is no token login.
+
+### Production configuration (not HTTP behaviour, recorded here because the API refuses to serve without it)
+
+The production rules apply in EVERY environment except `local`, `testing` and `loadtest` (`APP_ENV` is trimmed and compared case-insensitive, so `production`, `staging`, `prod`, `live` and `Production` are all covered; an unknown or empty name is production). While `php artisan portal:check-config` would fail, the application answers every HTTP request with `500 {"message":"Server Error"}` and writes the `critical` log line naming the failed rules (names, never values) at most once per distinct rule set per minute (`LogThrottle`: one `Cache::add` key with a 60 s TTL; if the cache is unavailable it fails open and logs). UNSAFE rules (error, exit 1): `APP_DEBUG` true, `APP_URL` not https, `APP_URL_WEB` missing, not https or localhost, `SESSION_SECURE_COOKIE` not true, `CORS_ALLOWED_ORIGINS` or `SANCTUM_STATEFUL_DOMAINS` containing `*`, `null`, a non-https origin, or missing the SPA origin, `TRUSTED_HOSTS` empty, `TRUSTED_PROXIES` empty while `TRUSTED_PROXIES_NONE` is not the boolean true, `LOG_LEVEL=debug`, `CACHE_STORE=array`, `SESSION_DRIVER=array`, `MAIL_MAILER` `log` or `array`. WARNINGS (never block, fail only under `--strict`): `CACHE_STORE=file`, `QUEUE_CONNECTION=sync`, `INVOICING_SELLER_NAME` still a placeholder (invoice issuing keeps its own refusal, which exempts only `local` and `testing`, so `loadtest` is NOT exempt there). `portal:check-config --json` prints `{ environment, enforced, ok, errors, warnings }` (`TRUSTED_PROXIES` is listed in `errors`, no longer in `warnings`). Console commands are never blocked; the deploy step runs `portal:check-config`.
+
+### Changes to earlier contracts (made by this phase)
+
+- Phase 1: rate-limit table gains the limiters above; `GET /sanctum/csrf-cookie` and the other public routes now carry the header set above. The Phase 1 note "Origin or Referer decides statefulness" is unchanged, hence `Referrer-Policy: origin`.
+- Phase 2: `page` is additionally bounded by the window; `GET /products` is under `catalog-search`.
+- Phase 3: `POST /orders` accepts `expected_subtotal_cents` (409); `GET /orders` with `q` is under `order-search` (shared with `GET /quotes` and `GET /invoices`, see the rate-limit table); reorder has its own limiter; the "unindexed PO search" performance note stays until the EXPLAIN review decides on a trigram index.
+- Phase 4: `GET /quotes` with `q` is under the shared `order-search` bucket; `DELETE` of an attachment is under `quote-attachment-delete`; staff purge (above, always audited); the mail layout header link now points at `app.web_url` (no API origin appears in any email); `POST /quotes/{number}/accept` joins `orders-create`.
+- Phase 5: `GET /invoices` with `q` is under the shared `order-search` bucket.
+- Phase 6: the "known gap" of per-product import audit rows is closed for HTTP imports; the epoch check fails closed.
+
+### Phase 7 endpoint summary (additions only)
+
+| Method | Path | Guest | Customer | Staff | Admin |
+| --- | --- | --- | --- | --- | --- |
+| GET | /api/v1/health/ready | 200, 503, 429 | same | same | same |
+| POST | /api/v1/orders | 401 | 201, 409, 422, 429 | 403 | 403 |
+| DELETE | /api/v1/quotes/{number}/attachments/{attachment} | 401 | 204, 404, 422, 429 | 204, 404, 429 (any quote status, always audited) | same |
+| GET | / (API host) | 404 | 404 | 404 | 404 |

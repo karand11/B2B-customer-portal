@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { expect, test } from '../helpers/fixtures';
 import { actor, actorFor, get, getJson, send } from '../helpers/api';
 import { MAILPIT_URL, PASSWORD, USERS } from '../helpers/env';
 

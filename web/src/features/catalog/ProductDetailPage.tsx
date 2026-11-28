@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { ApiError } from '../../lib/api';
 import { useFilters, useProduct } from './api';
@@ -29,16 +28,7 @@ export default function ProductDetailPage() {
   const from = (state as { from?: unknown } | null)?.from;
   // Only a query string produced by the list page is honoured.
   const back = `/catalog${typeof from === 'string' && from.startsWith('?') ? from : ''}`;
-  const partNumber = product.data?.part_number;
-
-  useEffect(() => {
-    if (!partNumber) return;
-    const prev = document.title;
-    document.title = partNumber;
-    return () => {
-      document.title = prev;
-    };
-  }, [partNumber]);
+  // The tab title follows the h1 (set once for every page by Layout).
 
   if (!validId) return <NotFound />;
   if (product.error instanceof ApiError && product.error.status === 404)
@@ -62,8 +52,8 @@ export default function ProductDetailPage() {
   if (!p || !filters.data)
     return (
       <div role="status" aria-busy="true" aria-label="Loading product">
-        <div className="mb-2 h-8 w-1/2 animate-pulse rounded bg-slate-200" />
-        <div className="h-32 animate-pulse rounded bg-slate-200" />
+        <div className="mb-2 h-8 w-1/2 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
+        <div className="h-32 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
       </div>
     );
 

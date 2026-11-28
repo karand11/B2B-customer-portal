@@ -83,8 +83,8 @@ export default function UserDetailPage() {
   if (!u)
     return (
       <div role="status" aria-busy="true" aria-label="Loading user">
-        <div className="mb-2 h-8 w-1/2 animate-pulse rounded bg-slate-200" />
-        <div className="h-32 animate-pulse rounded bg-slate-200" />
+        <div className="mb-2 h-8 w-1/2 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
+        <div className="h-32 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
       </div>
     );
 

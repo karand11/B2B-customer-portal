@@ -299,7 +299,7 @@ it('answers a malformed or non-object JSON body with 422 on body for every endpo
     $uri = str_replace('{n}', $quote->quote_number, $uri);
     $before = [$quote->fresh()->only(['status', 'valid_until', 'internal_note', 'staff_note']), QuoteRequest::count(), Order::count()];
 
-    $response = loginAs($w->{$who})->call($method, $uri, [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'], $raw);
+    $response = loginAs($w->{$who})->call($method, $uri, [], [], [], ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ORIGIN' => 'http://localhost:5173'], $raw);
 
     $response->assertStatus(422)->assertJsonValidationErrors('body');
     expect([$quote->fresh()->only(['status', 'valid_until', 'internal_note', 'staff_note']), QuoteRequest::count(), Order::count()])->toEqual($before);
@@ -319,7 +319,7 @@ it('answers a malformed or non-object JSON body with 422 on body for every endpo
 it('still accepts an empty body and a valid JSON object where all fields are optional', function () {
     $w = $this->w;
     $quote = makeQuote($w, 'inReview', ['valid_until' => '2026-12-31']);
-    $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'];
+    $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ORIGIN' => 'http://localhost:5173'];
     loginAs($w->staff);
 
     $this->call('PUT', "/api/v1/quotes/{$quote->quote_number}/pricing", [], [], [], $server, '')->assertOk();
@@ -330,7 +330,7 @@ it('still accepts an empty body and a valid JSON object where all fields are opt
 it('keeps the role and routing checks ahead of body validation for malformed JSON', function () {
     $w = $this->w;
     $quote = makeQuote($w, 'inReview');
-    $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'];
+    $server = ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json', 'HTTP_ORIGIN' => 'http://localhost:5173'];
 
     loginAs($w->a1)->call('PUT', "/api/v1/quotes/{$quote->quote_number}/pricing", [], [], [], $server, '{bad')->assertForbidden();
     loginAs($w->staff)->call('POST', "/api/v1/quotes/{$quote->quote_number}/accept", [], [], [], $server, '{bad')->assertForbidden();

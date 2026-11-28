@@ -112,12 +112,23 @@ class ProductAdmin
     /** @return array<string, mixed> the audited columns of a product (millimetres as numbers, as the API shows them) */
     private function values(Product $product): array
     {
+        return self::auditValues($product->attributesToArray());
+    }
+
+    /**
+     * The audited columns of a product row or of validated import values (shared with the CSV import, so both write the same shape).
+     *
+     * @param  array<string, mixed>  $a
+     * @return array<string, mixed>
+     */
+    public static function auditValues(array $a): array
+    {
         return [
-            'part_number' => $product->part_number, 'name' => $product->name, 'brand' => $product->brand, 'category_id' => $product->category_id,
-            'inner_diameter_mm' => Mm::number($product->inner_diameter_mm), 'outer_diameter_mm' => Mm::number($product->outer_diameter_mm),
-            'width_mm' => Mm::number($product->width_mm), 'material' => $product->material, 'seal_type' => $product->seal_type,
-            'price_cents' => $product->price_cents, 'price_on_request' => $product->price_on_request,
-            'stock_status' => $product->stock_status, 'active' => $product->active,
+            'part_number' => $a['part_number'], 'name' => $a['name'], 'brand' => $a['brand'], 'category_id' => $a['category_id'],
+            'inner_diameter_mm' => Mm::number($a['inner_diameter_mm']), 'outer_diameter_mm' => Mm::number($a['outer_diameter_mm']),
+            'width_mm' => Mm::number($a['width_mm']), 'material' => $a['material'], 'seal_type' => $a['seal_type'],
+            'price_cents' => $a['price_cents'], 'price_on_request' => $a['price_on_request'],
+            'stock_status' => $a['stock_status'], 'active' => $a['active'],
         ];
     }
 

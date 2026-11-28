@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
@@ -252,8 +253,8 @@ export default function QuoteDetailPage({
   if (!o)
     return (
       <div role="status" aria-busy="true" aria-label="Loading quote">
-        <div className="mb-2 h-8 w-1/2 animate-pulse rounded bg-slate-200" />
-        <div className="h-32 animate-pulse rounded bg-slate-200" />
+        <div className="mb-2 h-8 w-1/2 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
+        <div className="h-32 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
       </div>
     );
 
@@ -352,52 +353,54 @@ export default function QuoteDetailPage({
         </div>
       )}
 
-      <table className="mt-4 w-full border-collapse">
-        <caption className="mb-1 text-left text-sm">Requested items</caption>
-        <thead>
-          <tr className="border-b border-slate-400 bg-slate-100">
-            {[
-              'Item',
-              'Name',
-              'Brand',
-              'Quantity',
-              'Unit price',
-              'Line total',
-            ].map((h) => (
-              <th key={h} scope="col" className={th}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {o.items.map((i) => (
-            <tr key={i.position} className="border-b border-slate-300">
-              <td className={td}>
-                {i.kind === 'catalog' && i.product_id !== null ? (
-                  <Link
-                    to={`/catalog/${i.product_id}`}
-                    className="text-blue-800 underline"
-                  >
-                    {i.part_number}
-                  </Link>
-                ) : (
-                  'Custom item'
-                )}
-              </td>
-              <td className={td}>{i.name}</td>
-              <td className={td}>{i.brand ?? '—'}</td>
-              <td className={td}>{i.quantity}</td>
-              <td className={td}>
-                {priceOrAwaiting(i.unit_price_cents, o.currency)}
-              </td>
-              <td className={td}>
-                {priceOrAwaiting(i.line_total_cents, o.currency)}
-              </td>
+      <ScrollRegion label="Quote lines table">
+        <table className="mt-4 w-full border-collapse">
+          <caption className="mb-1 text-left text-sm">Requested items</caption>
+          <thead>
+            <tr className="border-b border-slate-400 bg-slate-100">
+              {[
+                'Item',
+                'Name',
+                'Brand',
+                'Quantity',
+                'Unit price',
+                'Line total',
+              ].map((h) => (
+                <th key={h} scope="col" className={th}>
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {o.items.map((i) => (
+              <tr key={i.position} className="border-b border-slate-300">
+                <td className={td}>
+                  {i.kind === 'catalog' && i.product_id !== null ? (
+                    <Link
+                      to={`/catalog/${i.product_id}`}
+                      className="text-blue-800 underline"
+                    >
+                      {i.part_number}
+                    </Link>
+                  ) : (
+                    'Custom item'
+                  )}
+                </td>
+                <td className={td}>{i.name}</td>
+                <td className={td}>{i.brand ?? '—'}</td>
+                <td className={td}>{i.quantity}</td>
+                <td className={td}>
+                  {priceOrAwaiting(i.unit_price_cents, o.currency)}
+                </td>
+                <td className={td}>
+                  {priceOrAwaiting(i.line_total_cents, o.currency)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
       <dl className="mt-4 ml-auto grid max-w-xs grid-cols-2 gap-1 text-right">
         <dt>Subtotal</dt>
         <dd>{priceOrAwaiting(o.subtotal_cents, o.currency)}</dd>

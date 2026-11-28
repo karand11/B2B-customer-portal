@@ -11,6 +11,7 @@ import {
   paged,
   setupAdmin,
 } from './fixtures';
+import { ACTIONS, actionLabel } from '../AuditPage';
 
 const ROWS = [
   entry(),
@@ -165,4 +166,56 @@ describe('audit log page', () => {
       await screen.findByText('No audit entries yet.'),
     ).toBeInTheDocument();
   });
+});
+
+// The vocabulary of docs/api-contract.md (and AuditLog::ACTIONS on the API side).
+const CONTRACT_ACTIONS = [
+  'order.status_changed',
+  'quote.reviewed',
+  'quote.sent',
+  'quote.reopened',
+  'quote.rejected',
+  'quote.accepted',
+  'quote.declined',
+  'quote.priced',
+  'quote.attachment_purged',
+  'invoice.created',
+  'invoice.paid',
+  'invoice.voided',
+  'product.created',
+  'product.updated',
+  'product.activated',
+  'product.deactivated',
+  'product.imported',
+  'product.import_updated',
+  'company.created',
+  'company.updated',
+  'user.invited',
+  'user.invitation_resent',
+  'user.invitation_revoked',
+  'user.invitation_accepted',
+  'user.updated',
+  'user.assignment_changed',
+  'user.deactivated',
+  'user.reactivated',
+  'user.password_reset_requested',
+];
+
+describe('audit action vocabulary', () => {
+  it('offers exactly the contract actions', () => {
+    expect([...ACTIONS].sort()).toEqual([...CONTRACT_ACTIONS].sort());
+  });
+
+  it.each(CONTRACT_ACTIONS)(
+    '?action=%s is kept, sent to the API and ticked',
+    async (action) => {
+      const { api } = setup(`/admin/audit-log?action=${action}`);
+      await screen.findByRole('table', { name: 'Audit log' });
+      expect(auditCalls(api)[0].url).toBe(
+        `/api/v1/admin/audit-log?action=${action}`,
+      );
+      expect(screen.getByLabelText(actionLabel(action))).toBeChecked();
+      expect(loc()).toHaveTextContent(`?action=${action}`);
+    },
+  );
 });

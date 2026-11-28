@@ -20,11 +20,17 @@ use Symfony\Component\Process\Process;
  * which is the interleaving that broke the old code (the second contender only re-checks what the first one changed).
  */
 
+// Real child processes and TRUNCATE: never inside a parallel worker pool with other tests (CI runs this group serially, after the parallel step).
+pest()->group('race');
+
 beforeEach(fn () => Mail::fake());
 
 /** Commit what the test has created so far (and what it will create), run the body, then empty the tables it touched. */
 function committed(Closure $body): void
 {
+    $database = (string) DB::connection()->getDatabaseName();
+    preg_match('/_test(_\d+)?$/D', $database) === 1 || throw new RuntimeException("Refusing to TRUNCATE the database [$database]: it must end in _test.");
+
     while (DB::transactionLevel() > 0) {
         DB::commit();
     }

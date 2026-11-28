@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
@@ -68,7 +69,7 @@ export default function OrdersPage({ basePath = '' }: { basePath?: string }) {
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
-            className="mb-2 h-8 animate-pulse rounded bg-slate-200"
+            className="mb-2 h-8 animate-pulse motion-reduce:animate-none rounded bg-slate-200"
           />
         ))}
       </div>
@@ -99,81 +100,84 @@ export default function OrdersPage({ basePath = '' }: { basePath?: string }) {
     body = (
       <>
         <div
-          className={orders.isPlaceholderData ? 'opacity-60' : undefined}
+          className={orders.isPlaceholderData ? 'opacity-80' : undefined}
           aria-busy={orders.isPlaceholderData}
         >
-          <table className="w-full border-collapse">
-            <caption className="sr-only">Orders</caption>
-            <thead>
-              <tr className="border-b border-slate-400 bg-slate-100">
-                <th scope="col" className={th}>
-                  Order number
-                </th>
-                <th scope="col" className={th}>
-                  PO reference
-                </th>
-                {isStaff && (
+          <ScrollRegion label="Orders table">
+            <table className="w-full border-collapse">
+              <caption className="sr-only">Orders</caption>
+              <thead>
+                <tr className="border-b border-slate-400 bg-slate-100">
                   <th scope="col" className={th}>
-                    Company
+                    Order number
                   </th>
-                )}
-                <th scope="col" className={th}>
-                  Date
-                </th>
-                <th scope="col" className={th}>
-                  Status
-                </th>
-                <th scope="col" className={th}>
-                  Items
-                </th>
-                <th scope="col" className={th}>
-                  Total
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.data.map((o) => (
-                <tr key={o.number} className="border-b border-slate-300">
-                  <td className={td}>
-                    <Link
-                      to={`${basePath}/orders/${o.number}`}
-                      className="text-blue-800 underline"
-                    >
-                      {o.number}
-                    </Link>
-                  </td>
-                  <td className={td}>{o.po_reference ?? '-'}</td>
+                  <th scope="col" className={th}>
+                    PO reference
+                  </th>
                   {isStaff && (
-                    <td className={td}>
-                      {basePath ? (
-                        <Link
-                          to={`${basePath}/companies/${o.company.id}`}
-                          className="text-blue-800 underline"
-                        >
-                          {o.company.name}
-                        </Link>
-                      ) : (
-                        o.company.name
-                      )}
-                    </td>
+                    <th scope="col" className={th}>
+                      Company
+                    </th>
                   )}
-                  <td className={td}>{formatDate(o.created_at)}</td>
-                  <td className={td}>
-                    <StatusBadge status={o.status} />
-                  </td>
-                  <td className={td}>{o.line_count}</td>
-                  <td className={td}>
-                    {formatMoney(o.total_cents, o.currency)}
-                  </td>
+                  <th scope="col" className={th}>
+                    Date
+                  </th>
+                  <th scope="col" className={th}>
+                    Status
+                  </th>
+                  <th scope="col" className={th}>
+                    Items
+                  </th>
+                  <th scope="col" className={th}>
+                    Total
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {list.data.map((o) => (
+                  <tr key={o.number} className="border-b border-slate-300">
+                    <td className={td}>
+                      <Link
+                        to={`${basePath}/orders/${o.number}`}
+                        className="text-blue-800 underline"
+                      >
+                        {o.number}
+                      </Link>
+                    </td>
+                    <td className={td}>{o.po_reference ?? '-'}</td>
+                    {isStaff && (
+                      <td className={td}>
+                        {basePath ? (
+                          <Link
+                            to={`${basePath}/companies/${o.company.id}`}
+                            className="text-blue-800 underline"
+                          >
+                            {o.company.name}
+                          </Link>
+                        ) : (
+                          o.company.name
+                        )}
+                      </td>
+                    )}
+                    <td className={td}>{formatDate(o.created_at)}</td>
+                    <td className={td}>
+                      <StatusBadge status={o.status} />
+                    </td>
+                    <td className={td}>{o.line_count}</td>
+                    <td className={td}>
+                      {formatMoney(o.total_cents, o.currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </ScrollRegion>
         </div>
         {list.meta.last_page > 1 && (
           <Pagination
             page={list.meta.current_page}
             lastPage={list.meta.last_page}
+            perPage={list.meta.per_page}
             onPage={(page) => {
               update({ page });
               headingRef.current?.focus();

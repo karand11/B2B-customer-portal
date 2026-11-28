@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ConfirmDialog from '../../components/ConfirmDialog';
@@ -155,7 +156,7 @@ export default function CartPage() {
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="mb-2 h-8 animate-pulse rounded bg-slate-200"
+            className="mb-2 h-8 animate-pulse motion-reduce:animate-none rounded bg-slate-200"
           />
         ))}
       </div>
@@ -173,36 +174,38 @@ export default function CartPage() {
     const c = cart.data;
     body = (
       <>
-        <table className="w-full border-collapse">
-          <caption className="sr-only">Items in your cart</caption>
-          <thead>
-            <tr className="border-b border-slate-400 bg-slate-100">
-              {[
-                'Part number',
-                'Name',
-                'Brand',
-                'Unit price',
-                'Quantity',
-                'Line total',
-                'Remove',
-              ].map((h) => (
-                <th key={h} scope="col" className={th}>
-                  {h}
-                </th>
+        <ScrollRegion label="Cart table">
+          <table className="w-full border-collapse">
+            <caption className="sr-only">Items in your cart</caption>
+            <thead>
+              <tr className="border-b border-slate-400 bg-slate-100">
+                {[
+                  'Part number',
+                  'Name',
+                  'Brand',
+                  'Unit price',
+                  'Quantity',
+                  'Line total',
+                  'Remove',
+                ].map((h) => (
+                  <th key={h} scope="col" className={th}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {c.items.map((l) => (
+                <Row
+                  key={l.product_id}
+                  line={l}
+                  currency={c.currency}
+                  onDone={done}
+                />
               ))}
-            </tr>
-          </thead>
-          <tbody>
-            {c.items.map((l) => (
-              <Row
-                key={l.product_id}
-                line={l}
-                currency={c.currency}
-                onDone={done}
-              />
-            ))}
-          </tbody>
-        </table>
+            </tbody>
+          </table>
+        </ScrollRegion>
         <div className="mt-4 text-right">
           <p className="text-lg font-semibold">
             Subtotal: {formatMoney(c.subtotal_cents, c.currency)}
@@ -230,7 +233,7 @@ export default function CartPage() {
                 type="button"
                 disabled
                 aria-describedby="checkout-why"
-                className="rounded bg-blue-700 px-4 py-2 text-white opacity-50"
+                className="rounded bg-blue-700 px-4 py-2 text-white disabled:opacity-50"
               >
                 Proceed to checkout
               </button>

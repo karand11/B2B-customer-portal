@@ -18,7 +18,7 @@ $kernel = $app->make(Kernel::class);
 $kernel->bootstrap();
 
 $database = (string) config('database.connections.pgsql.database');
-if (! str_ends_with($database, '_test')) {
+if (preg_match('/_test(_\d+)?$/D', $database) !== 1) {
     fwrite(STDERR, "refusing to run against [$database]\n");
     exit(2);
 }

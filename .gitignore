@@ -4,3 +4,9 @@
 .vscode/
 .DS_Store
 .claude/settings.local.json
+
+# Phase 7 outputs
+e2e/a11y-reports/
+e2e/loadtest/results/
+ops/**/*.dump
+ops/**/*-files.tar.gz

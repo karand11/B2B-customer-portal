@@ -8,6 +8,7 @@ import {
   type BrowserContext,
   type Page,
 } from '@playwright/test';
+import { watchCsp } from './csp';
 import { DATA_FILE, PASSWORD, USERS, WEB_URL, statePath, type Role } from './env';
 
 // Both a BrowserContext and an APIRequestContext expose the cookie jar through storageState().
@@ -45,6 +46,16 @@ export async function send(
   return request.fetch(url, { method, headers: await xsrfHeaders(context), data });
 }
 
+/** multipart/form-data POST (uploads): the boundary and Content-Type are set by Playwright, the CSRF header and Origin by us. */
+export async function sendForm(
+  context: BrowserContext | APIRequestContext,
+  url: string,
+  multipart: Record<string, string | { name: string; mimeType: string; buffer: Buffer }>,
+): Promise<APIResponse> {
+  const request = 'request' in context ? context.request : context;
+  return request.post(url, { headers: await xsrfHeaders(context), multipart });
+}
+
 /** GET with the Origin header Sanctum needs to treat the call as part of the SPA session. */
 export async function get(context: BrowserContext | APIRequestContext, url: string): Promise<APIResponse> {
   const request = 'request' in context ? context.request : context;
@@ -71,12 +82,14 @@ export const writeProduct = (p: E2eProduct) => {
 /** A browser context signed in as a demo role from the storageState written by global-setup. */
 export async function actor(browser: Browser, role: Role): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({ baseURL: WEB_URL, storageState: statePath(role) });
+  await watchCsp(context);
   return { context, page: await context.newPage() };
 }
 
 /** A browser context signed in as any user (fresh session, independent of the saved states). */
 export async function actorFor(browser: Browser, email: string, password = PASSWORD) {
   const context = await browser.newContext({ baseURL: WEB_URL });
+  await watchCsp(context);
   await login(context.request, email, password);
   return { context, page: await context.newPage() };
 }

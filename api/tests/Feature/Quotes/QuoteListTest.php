@@ -141,7 +141,9 @@ it('paginates with exactly six meta keys, and a page beyond the last is an empty
     $beyond = $this->getJson('/api/v1/quotes?per_page=2&page=9')->assertOk();
     expect($beyond->json('data'))->toBe([])->and($beyond->json('meta.from'))->toBeNull()->and($beyond->json('meta.to'))->toBeNull()->and($beyond->json('meta.total'))->toBe(5);
     $this->getJson('/api/v1/quotes?per_page=100')->assertOk();
-    $this->getJson('/api/v1/quotes?page=10000')->assertOk();
+    // The Phase 7 result window: page * per_page (20 by default) may not exceed 10,000.
+    $this->getJson('/api/v1/quotes?page=500')->assertOk();
+    $this->getJson('/api/v1/quotes?page=501')->assertStatus(422)->assertJsonValidationErrors('page');
 });
 
 it('answers invalid list parameters with 422 on that parameter, never 500', function (string $query, string $key) {

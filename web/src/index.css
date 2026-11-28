@@ -1,1 +1,44 @@
 @import 'tailwindcss';
+
+/*
+ * Accessibility base rules (docs/phase-7-design.md section 7).
+ * Kept in the base layer so a utility such as outline-none on a heading that is only a
+ * programmatic focus target (tabindex="-1") still wins.
+ */
+@layer base {
+  /* A visible focus ring on every control, in one colour with a 3:1+ contrast on white. */
+  :where(
+    a,
+    button,
+    input,
+    select,
+    textarea,
+    summary,
+    [tabindex]
+  ):focus-visible {
+    outline: 2px solid var(--color-blue-700);
+    outline-offset: 2px;
+  }
+
+  /* Pointer target size of at least 24 by 24 CSS px (WCAG 2.2, 2.5.8). Inline links are exempt. */
+  :where(button, [role='button'], select) {
+    min-height: 1.5rem;
+    min-width: 1.5rem;
+  }
+  :where(input[type='checkbox'], input[type='radio']) {
+    width: 1.5rem;
+    height: 1.5rem;
+  }
+}
+
+/* No motion for people who ask for none (the loading skeletons pulse). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

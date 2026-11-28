@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\NormalizesEmail;
+use App\Support\PasswordPolicy;
 use Illuminate\Foundation\Http\FormRequest;
 
 class ResetPasswordRequest extends FormRequest
@@ -14,13 +15,13 @@ class ResetPasswordRequest extends FormRequest
         return true;
     }
 
-    /** @return array<string, list<string>> */
+    /** @return array<string, list<mixed>> */
     public function rules(): array
     {
         return [
             'token' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255'],
-            'password' => ['required', 'string', 'min:10', 'max:255', 'confirmed'],
+            'password' => ['bail', 'required', 'string', 'confirmed', PasswordPolicy::rule()],
         ];
     }
 }

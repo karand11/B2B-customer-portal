@@ -137,3 +137,21 @@ it('restricts deleting the actor of a history row that is not the order creator'
 
     expect(fn () => DB::transaction(fn () => User::whereKey($staff->id)->delete()))->toThrow(QueryException::class);
 });
+
+it('makes order lines append-only: no UPDATE, no DELETE (the trigger), while INSERT and TRUNCATE stay possible', function () {
+    violates(fn () => DB::table('order_items')->where('id', $this->item->id)->update(['quantity' => 3, 'line_total_cents' => $this->item->unit_price_cents * 3]), 'order_items are append-only');
+    violates(fn () => DB::table('order_items')->where('id', $this->item->id)->delete(), 'order_items are append-only');
+
+    expect(OrderItem::whereKey($this->item->id)->value('quantity'))->toBe($this->item->quantity);
+    expect(DB::selectOne("select count(*) as n from pg_trigger where tgname = 'order_items_append_only' and not tgisinternal")->n)->toBe(1);
+});
+
+it('has no code path that updates or deletes order lines (only inserts)', function () {
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator(app_path())) as $file) {
+        if ($file->getExtension() !== 'php') {
+            continue;
+        }
+        $code = file_get_contents($file->getPathname());
+        expect(preg_match('/order_items.{0,80}->(update|delete|truncate)\(|OrderItem::[^;]{0,120}->(update|delete)\(|OrderItem::(destroy|truncate)\(/s', $code))->toBe(0, $file->getPathname());
+    }
+});

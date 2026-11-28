@@ -233,13 +233,22 @@ describe('search and range debounce', () => {
     expect(listUrls(api).at(-1)).toBe('/api/v1/products?q=6205');
   });
 
+  it('a filter chip keeps its visible text at the start of its name (WCAG 2.5.3)', async () => {
+    setup('/catalog?q=6205');
+    const chip = await screen.findByRole('button', {
+      name: /^Part number: 6205/,
+    });
+    expect(chip).not.toHaveAttribute('aria-label');
+    expect(chip).toHaveAccessibleName('Part number: 6205 remove filter');
+  });
+
   it('a q changed by back/forward updates the input', async () => {
     const user = userEvent.setup();
     const { router } = setup('/catalog?q=6205');
     const input = await screen.findByLabelText('Part number');
     expect(input).toHaveValue('6205');
     await user.click(
-      screen.getByRole('button', { name: 'Remove filter Part number: 6205' }),
+      screen.getByRole('button', { name: 'Part number: 6205 remove filter' }),
     );
     await waitFor(() => expect(input).toHaveValue(''));
     await act(() => router.navigate(-1));
@@ -446,11 +455,11 @@ describe('accessibility', () => {
     expect(count).toHaveAttribute('role', 'status');
     expect(count).toHaveAttribute('aria-live', 'polite');
     expect(
-      screen.getByRole('button', { name: 'Remove filter Brand: SKF' }),
+      screen.getByRole('button', { name: 'Brand: SKF remove filter' }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole('button', {
-        name: 'Remove filter Outer diameter: 40 to 60 mm',
+        name: 'Outer diameter: 40 to 60 mm remove filter',
       }),
     ).toBeInTheDocument();
     expect(
@@ -465,7 +474,7 @@ describe('accessibility', () => {
     const user = userEvent.setup();
     setup('/catalog?brand=SKF,NSK');
     await user.click(
-      await screen.findByRole('button', { name: 'Remove filter Brand: SKF' }),
+      await screen.findByRole('button', { name: 'Brand: SKF remove filter' }),
     );
     expect(loc()).toBe('/catalog?brand=NSK');
   });
@@ -514,7 +523,7 @@ describe('categories names in chips', () => {
     setup('/catalog?category=tapered-roller');
     expect(
       await screen.findByRole('button', {
-        name: 'Remove filter Category: Tapered roller bearings',
+        name: 'Category: Tapered roller bearings remove filter',
       }),
     ).toBeInTheDocument();
   });

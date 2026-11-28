@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\OrderStatus;
+use App\Exceptions\CartPricesChanged;
 use App\Models\CartItem;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -10,14 +11,15 @@ use App\Models\OrderStatusHistory;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
 
-/** Builds an order from the user's cart. The client supplies nothing but an optional PO reference. */
+/** Builds an order from the user's cart. The client supplies nothing but an optional PO reference and the subtotal it expects to pay. */
 class PlaceOrder
 {
     public function __construct(private CartService $cart, private OrderInserter $orders) {}
 
-    public function handle(User $user, ?string $poReference): Order
+    /** @throws CartPricesChanged when `$expectedSubtotal` is given and differs from the cart's subtotal right now (nothing is created) */
+    public function handle(User $user, ?string $poReference, ?int $expectedSubtotal = null): Order
     {
-        return $this->cart->locked($user, function () use ($user, $poReference) {
+        return $this->cart->locked($user, function () use ($user, $poReference, $expectedSubtotal) {
             // A concurrent double submit waits on the user lock, then finds the cart empty here.
             $lines = $this->cart->items($user);
 
@@ -48,6 +50,11 @@ class PlaceOrder
                 'updated_at' => $now,
             ]);
             $subtotal = $rows->sum('line_total_cents');
+
+            // After the cart checks, under the user lock: the prices are the ones the order would be created with.
+            if ($expectedSubtotal !== null && $expectedSubtotal !== $subtotal) {
+                throw new CartPricesChanged;
+            }
 
             $order = $this->orders->insert([
                 'company_id' => $user->company_id,

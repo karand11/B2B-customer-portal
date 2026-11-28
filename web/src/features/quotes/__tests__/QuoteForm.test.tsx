@@ -102,18 +102,26 @@ describe('quote form: lines', () => {
     expect(screen.getByRole('button', { name: 'Add NU206' })).toBeEnabled();
   });
 
+  it('the remove button name starts with its visible text (WCAG 2.5.3)', async () => {
+    const { user } = await open();
+    await custom(user, 'First');
+    const btn = screen.getByRole('button', { name: 'Remove line 1' });
+    expect(btn).not.toHaveAttribute('aria-label');
+    expect(btn).toHaveTextContent('Remove line 1');
+  });
+
   it('adds custom lines and removing one moves focus to the next line, then to the add button', async () => {
     const { user } = await open();
     await custom(user, 'First');
     await custom(user, 'Second');
     expect(within(groupOf(2)).getByLabelText('Description')).toHaveFocus();
-    await user.click(screen.getByRole('button', { name: 'Remove item 1' }));
+    await user.click(screen.getByRole('button', { name: 'Remove line 1' }));
     expect(screen.queryByRole('group', { name: 'Item 2' })).toBeNull();
     expect(within(groupOf(1)).getByLabelText('Description')).toHaveValue(
       'Second',
     );
     expect(within(groupOf(1)).getByLabelText('Description')).toHaveFocus();
-    await user.click(screen.getByRole('button', { name: 'Remove item 1' }));
+    await user.click(screen.getByRole('button', { name: 'Remove line 1' }));
     expect(
       screen.getByRole('button', { name: 'Add custom item' }),
     ).toHaveFocus();

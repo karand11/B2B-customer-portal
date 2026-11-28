@@ -6,6 +6,7 @@ use App\Models\Category;
 use App\Models\Product;
 use App\Support\PartNumber;
 use App\Support\ProductRules;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Reads a CSV stream and validates, classifies and (unless $dry) upserts its rows by normalised part number.
@@ -35,15 +36,23 @@ class ProductImporter
 
     private int $maxRows = 0;
 
+    private bool $collect = false;
+
+    /** @var list<array{string, string, array<string, mixed>, array<string, mixed>}> */
+    private array $changes = [];
+
     /**
      * @param  resource  $handle
+     * @param  bool  $collectChanges  also return the before/after of every updated product that really changes (the HTTP import audits them; a dry run never collects)
      *
      * @throws ImportFatal nothing was imported (empty file, bad header, too many rows); `warnings` holds what was found before
      */
-    public function run($handle, bool $dry, int $maxRows): ImportReport
+    public function run($handle, bool $dry, int $maxRows, bool $collectChanges = false): ImportReport
     {
         $this->maxRows = $maxRows;
         $this->warnings = [];
+        $this->collect = $collectChanges && ! $dry;
+        $this->changes = [];
 
         try {
             return $this->import($handle, $dry);
@@ -96,7 +105,7 @@ class ProductImporter
 
         $this->flushChunk($chunk, $dry, $stats);
 
-        return new ImportReport($stats['read'], $stats['created'], $stats['updated'], $stats['bad'], $bad, $this->warnings);
+        return new ImportReport($stats['read'], $stats['created'], $stats['updated'], $stats['bad'], $bad, $this->warnings, $this->changes);
     }
 
     /** @param  array<string, array<string, mixed>>  $chunk keyed by normalised part number */
@@ -106,9 +115,12 @@ class ProductImporter
             return;
         }
 
-        $existing = Product::whereIn('part_number_search', array_keys($chunk))->count();
+        $rows = Product::whereIn('part_number_search', array_keys($chunk))->get();
+        $existing = $rows->count();
         $stats['updated'] += $existing;
         $stats['created'] += count($chunk) - $existing;
+
+        $this->collect && $this->collectChanges($rows, $chunk);
 
         if (! $dry) {
             // Without an `active` column in the file a conflict update must not touch it (an insert still gets the default, true):
@@ -118,6 +130,26 @@ class ProductImporter
                 'width_mm', 'material', 'seal_type', 'price_cents', 'price_on_request', 'stock_status',
                 ...(in_array('active', $this->header, true) ? ['active'] : []),
             ]);
+        }
+    }
+
+    /**
+     * The products this chunk is about to overwrite, with the audited values before and after (only the ones that differ).
+     * Without an `active` column the upsert leaves `active` alone, so it is not a change either.
+     *
+     * @param  Collection<int, Product>  $existing
+     * @param  array<string, array<string, mixed>>  $chunk
+     */
+    private function collectChanges($existing, array $chunk): void
+    {
+        $hasActive = in_array('active', $this->header, true);
+
+        foreach ($existing as $product) {
+            $before = ProductAdmin::auditValues($product->attributesToArray());
+            $after = ProductAdmin::auditValues($chunk[$product->part_number_search]);
+            $hasActive || $after['active'] = $before['active'];
+
+            $before === $after || $this->changes[] = [(string) $product->id, $product->part_number, $before, $after];
         }
     }
 

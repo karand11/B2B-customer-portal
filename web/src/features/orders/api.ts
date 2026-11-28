@@ -4,7 +4,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
-import { api } from '../../lib/api';
+import { ApiError, api } from '../../lib/api';
 import { CART_KEY, type Cart } from '../cart/api';
 import { toSearch, type OrderQuery } from './urlState';
 
@@ -97,20 +97,40 @@ export const useOrder = (number: string, enabled: boolean) =>
     enabled,
   });
 
+export interface PlaceOrderInput {
+  po_reference?: string;
+  /** Subtotal of the cart on screen; the server answers 409 if it differs. */
+  expected_subtotal_cents: number;
+}
+
+/** The fresh cart of a checkout 409 (contract Phase 7), or null for any other error. */
+export function priceChangeCart(e: unknown): Cart | null {
+  if (!(e instanceof ApiError) || e.status !== 409) return null;
+  const c = e.body.cart as Partial<Cart> | undefined;
+  return c && typeof c.subtotal_cents === 'number' && Array.isArray(c.items)
+    ? (c as Cart)
+    : null;
+}
+
 export function usePlaceOrder() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (po_reference: string | undefined) =>
-      api.post<{ data: OrderDetail }>(
-        '/api/v1/orders',
-        po_reference ? { po_reference } : undefined,
-      ),
+    mutationFn: ({ po_reference, expected_subtotal_cents }: PlaceOrderInput) =>
+      api.post<{ data: OrderDetail }>('/api/v1/orders', {
+        ...(po_reference ? { po_reference } : {}),
+        expected_subtotal_cents,
+      }),
     onSuccess: (res) => {
       qc.setQueryData(detailKey(res.data.number), res.data);
       void qc.invalidateQueries({ queryKey: ['orders', 'list'] });
     },
-    // A 422 means the server's cart differs from what the user saw.
-    onError: () => void qc.invalidateQueries({ queryKey: CART_KEY }),
+    onError: (e) => {
+      // 409: the body already is the fresh cart. Otherwise (422) the server's cart
+      // differs from what the user saw: refetch it.
+      const fresh = priceChangeCart(e);
+      if (fresh) qc.setQueryData(CART_KEY, fresh);
+      else void qc.invalidateQueries({ queryKey: CART_KEY });
+    },
   });
 }
 

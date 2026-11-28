@@ -34,7 +34,7 @@ class ListAuditLogRequest extends AdminListRequest
     /** @return array<int, Closure> */
     public function after(): array
     {
-        return [function (Validator $validator) {
+        return [...parent::after(), function (Validator $validator) {
             [$from, $to] = [$this->query('from'), $this->query('to')];
 
             if (is_string($from) && is_string($to) && ! $validator->errors()->hasAny(['from', 'to']) && $from > $to) {

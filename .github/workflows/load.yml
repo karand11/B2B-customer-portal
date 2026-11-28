@@ -1,0 +1,57 @@
+name: Load check (catalog search)
+
+# A regression indicator, NOT the gate: shared GitHub runners are noisy. The authoritative gate run (p95 < 500 ms,
+# 50 virtual users) is local Docker or Phase 8 staging. Never runs on pull requests.
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "43 4 * * 1"
+
+concurrency:
+  group: load-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  load:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Random password for the throwaway load users
+        run: |
+          pw="$(openssl rand -hex 16)"
+          echo "::add-mask::$pw"
+          echo "LOADTEST_PASSWORD=$pw" >> "$GITHUB_ENV"
+      - name: Start the rig (nginx + php-fpm with opcache + Postgres)
+        run: docker compose -f ops/loadtest/compose.yml up -d --build
+      - name: Migrate and seed (5,000 products, 100 users, orders, quotes, invoices, audit rows)
+        run: |
+          docker compose -f ops/loadtest/compose.yml exec -T app php artisan migrate --force
+          docker compose -f ops/loadtest/compose.yml exec -T app php artisan portal:loadtest-seed
+      - name: Run the load script
+        env:
+          LOADTEST_BASE_URL: http://localhost:8200
+          LOADTEST_P95_MS: "1000"
+          LOADTEST_DURATION: "60"
+        run: node e2e/loadtest/catalog-search.mjs
+      - name: Rig logs on failure
+        if: failure()
+        run: docker compose -f ops/loadtest/compose.yml logs --tail=200
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: loadtest-results
+          path: e2e/loadtest/results
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Stop the rig
+        if: always()
+        run: docker compose -f ops/loadtest/compose.yml down -v

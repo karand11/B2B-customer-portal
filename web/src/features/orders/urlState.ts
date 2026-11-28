@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PER_PAGE, clampPage } from '../../lib/pageWindow';
 import type { OrderStatus } from './api';
 
 export const STATUSES: OrderStatus[] = [
@@ -82,7 +83,7 @@ export function parseQuery(sp: URLSearchParams): OrderQuery {
     q: q.length <= 32 ? q : '',
     company_id: /^[1-9]\d{0,17}$/.test(company) ? company : '',
     sort: sort.success ? sort.data : DEFAULT_SORT,
-    page: page.success ? page.data : 1,
+    page: page.success ? clampPage(page.data, PER_PAGE.list) : 1,
   };
 }
 

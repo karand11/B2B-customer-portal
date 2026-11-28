@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
+import { type Page } from '@playwright/test';
+import { expect, test } from '../helpers/fixtures';
 import { actor, getJson, readProduct, send } from '../helpers/api';
 
 const isApi = (page: Page, method: string, path: string) =>

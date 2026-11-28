@@ -5,6 +5,7 @@ namespace Tests;
 use App\Services\AuditLog;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -17,7 +18,8 @@ abstract class TestCase extends BaseTestCase
     {
         $name = DB::connection()->getDatabaseName();
 
-        if (! str_ends_with((string) $name, '_test')) {
+        // `_test_<n>` is the per-worker database of `pest --parallel`.
+        if (preg_match('/_test(_\d+)?$/D', (string) $name) !== 1) {
             throw new RuntimeException("Refusing to run tests against database [$name]: name must end with _test.");
         }
 
@@ -32,6 +34,9 @@ abstract class TestCase extends BaseTestCase
     protected function tearDown(): void
     {
         AuditLog::$baseTransactionLevel = 0;
+        // Process-wide static state of the request class: a test that configured trusted hosts or proxies must not leak them into the next test.
+        Request::setTrustedHosts([]);
+        Request::setTrustedProxies([], Request::HEADER_X_FORWARDED_FOR);
 
         parent::tearDown();
     }

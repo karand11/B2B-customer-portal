@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../../auth/AuthContext';
 import {
   attachmentUrl,
   detailKey,
@@ -13,6 +14,11 @@ import { UPLOAD_LABELS, useUploads } from './useUploads';
 
 const btn = 'rounded border border-slate-600 px-2 py-0.5 text-sm';
 
+export const CSV_WARNING =
+  'CSV files can contain spreadsheet formulas. Open it in a text editor, or disable formulas and links in your spreadsheet.';
+const isCsv = (a: QuoteAttachment) =>
+  /.csv$/i.test(a.name) || a.mime === 'text/csv';
+
 /** Downloads go through the API only (the session cookie authorises the GET). */
 export default function AttachmentsPanel({ quote }: { quote: QuoteDetail }) {
   const qc = useQueryClient();
@@ -22,7 +28,11 @@ export default function AttachmentsPanel({ quote }: { quote: QuoteDetail }) {
     [],
   );
   const [deleting, setDeleting] = useState<QuoteAttachment | null>(null);
+  const { user } = useAuth();
+  const isStaff = user?.role === 'staff' || user?.role === 'admin';
   const canAttach = quote.allowed_actions.includes('attach');
+  // Staff may delete in any status; once the quote is closed that is a purge (audited by the API).
+  const canPurge = isStaff && !canAttach;
 
   const onFiles = async (list: FileList | null) => {
     const check = checkFiles([...(list ?? [])], {
@@ -50,6 +60,9 @@ export default function AttachmentsPanel({ quote }: { quote: QuoteDetail }) {
               <a
                 href={attachmentUrl(quote.number, a.id)}
                 download
+                aria-describedby={
+                  isStaff && isCsv(a) ? `csv-warning-${a.id}` : undefined
+                }
                 className="text-blue-800 underline"
               >
                 {a.name}
@@ -58,6 +71,24 @@ export default function AttachmentsPanel({ quote }: { quote: QuoteDetail }) {
                 ({formatBytes(a.size_bytes)},{' '}
                 {a.uploaded_by.name ?? 'Portal staff'})
               </span>
+              {isStaff && isCsv(a) && (
+                <span
+                  id={`csv-warning-${a.id}`}
+                  className="w-full rounded border border-amber-700 bg-amber-50 px-2 py-1 text-amber-900"
+                >
+                  {CSV_WARNING}
+                </span>
+              )}
+              {canPurge && (
+                <button
+                  type="button"
+                  aria-label={`Purge ${a.name}`}
+                  onClick={() => setDeleting(a)}
+                  className={btn}
+                >
+                  Purge
+                </button>
+              )}
               {canAttach && (
                 <button
                   type="button"
@@ -82,6 +113,7 @@ export default function AttachmentsPanel({ quote }: { quote: QuoteDetail }) {
           </label>
           <input
             id="attachment-files"
+            className="block w-full max-w-full"
             type="file"
             multiple
             accept={ACCEPT_ATTR}
@@ -126,14 +158,23 @@ export default function AttachmentsPanel({ quote }: { quote: QuoteDetail }) {
       )}
       {deleting && (
         <ActionDialog
-          title="Delete this attachment?"
-          confirmLabel="Yes, delete"
+          title={
+            canPurge ? 'Purge this attachment?' : 'Delete this attachment?'
+          }
+          confirmLabel={canPurge ? 'Yes, purge' : 'Yes, delete'}
           cancelLabel="Keep file"
           tone="danger"
           onClose={() => setDeleting(null)}
           submit={() => del.mutateAsync(deleting.id)}
         >
-          <p>{deleting.name} will be removed from the quote.</p>
+          {canPurge ? (
+            <p>
+              {deleting.name} will be permanently deleted from this closed
+              quote. The purge is recorded in the audit log.
+            </p>
+          ) : (
+            <p>{deleting.name} will be removed from the quote.</p>
+          )}
         </ActionDialog>
       )}
     </section>

@@ -101,6 +101,15 @@ npx playwright test                 # starts the API and web servers itself and 
 ```
 `E2E_CHANNEL=msedge` uses Edge instead of the downloaded Chromium. See `e2e/README.md`.
 
+## Security, operations and quality tooling (Phase 7 on)
+See `docs/SECURITY.md` for the controls and `docs/phase-7-design.md` for the full design.
+
+- **Dependency audit:** `node ops/audit/check-audit.mjs --self-test`, and in CI (`audit.yml`, also weekly) `composer audit` and `npm audit` fail on high or critical advisories unless `.audit-allowlist.json` has a valid entry (reason, owner, at most 60 days).
+- **Backups and restore drill** (`ops/backup/`, guide in `docs/ops/backup.md`): `backup.sh`, `restore.sh`, and `restore-drill.sh`, which restores into a scratch database and proves tables, row contents, triggers, indexes and files are identical and the app boots against it. Without PostgreSQL client tools on the host: `USE_DOCKER=1 PGUSER=portal PGPASSWORD=secret SOURCE_DB=portal_e2e bash ops/backup/restore-drill.sh` (on Windows use Git Bash). Record runs in `docs/ops/restore-log.md`.
+- **Database roles** (`ops/db/roles.sql`, check with `ops/db/verify-roles.sh`): the runtime role cannot truncate, create triggers, alter tables or touch audit rows.
+- **Load check** (`ops/loadtest/`): nginx + php-fpm with opcache + Postgres in Docker, seeded with 5,000 products and realistic order, quote, invoice and audit volumes. set a throwaway password first (`export LOADTEST_PASSWORD="$(openssl rand -hex 16)"`; the rig refuses to start without it, and the script and seed command use the same value), then `docker compose -f ops/loadtest/compose.yml up -d --build`, then `exec app php artisan migrate --force` and `exec app php artisan portal:loadtest-seed`, then `node e2e/loadtest/catalog-search.mjs` (local addresses only: it refuses anything else without `LOADTEST_ALLOW_REMOTE=1`) (gate: p95 under 500 ms with 50 virtual users and rate limits left on). Stop with `docker compose -f ops/loadtest/compose.yml down -v`. Throwaway credentials only: never expose the rig to a network.
+- **Production configuration:** `docs/ops/env.production.example` and `docs/ops/nginx-spa-headers.conf` are the Phase 8 starting points; `php artisan portal:check-config` fails when unsafe settings are left in place.
+
 ## Checks (run before finishing any task)
 ```bash
 cd api && ./vendor/bin/pest && ./vendor/bin/pint --test

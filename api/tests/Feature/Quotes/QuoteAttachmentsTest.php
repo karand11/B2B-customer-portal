@@ -274,14 +274,17 @@ it('deletes the row and the file; customers only their own files; staff any', fu
     expect(QuoteAttachment::count())->toBe(0)->and(openFiles())->toBe([]);
 });
 
-it('refuses to delete from a quote that is no longer open', function (string $state) {
+it('refuses a CUSTOMER to delete from a quote that is no longer open, while staff may purge it (Phase 7, audited: see Security/AttachmentPurgeTest)', function (string $state) {
     $quote = makeQuote($this->w, $state);
     $file = QuoteAttachment::factory()->create(['quote_request_id' => $quote->id]);
 
     loginAs($this->w->a1)->deleteJson("/api/v1/quotes/{$quote->quote_number}/attachments/{$file->public_id}")->assertStatus(422)->assertJsonValidationErrors('status');
-    loginAs($this->w->staff)->deleteJson("/api/v1/quotes/{$quote->quote_number}/attachments/{$file->public_id}")->assertStatus(422);
     expect(QuoteAttachment::whereKey($file->id)->exists())->toBeTrue();
     Storage::disk('quotes')->assertExists($file->storage_path);
+
+    loginAs($this->w->staff)->deleteJson("/api/v1/quotes/{$quote->quote_number}/attachments/{$file->public_id}")->assertNoContent();
+    expect(QuoteAttachment::whereKey($file->id)->exists())->toBeFalse();
+    Storage::disk('quotes')->assertMissing($file->storage_path);
 })->with(['quoted', 'accepted', 'declined', 'expired']);
 
 it('logs a failing file removal and still answers 204 without a dangling row', function () {

@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
@@ -221,41 +222,43 @@ function Detail({ inv, basePath }: { inv: InvoiceDetail; basePath: string }) {
         </dd>
       </dl>
 
-      <table className="w-full border-collapse">
-        <caption className="mb-1 text-left text-sm">Invoice lines</caption>
-        <thead>
-          <tr className="border-b border-slate-400 bg-slate-100">
-            {[
-              'Part number',
-              'Name',
-              'Brand',
-              'Unit price',
-              'Quantity',
-              'Line total',
-            ].map((h) => (
-              <th key={h} scope="col" className={th}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {inv.items.map((i) => (
-            <tr key={i.position} className="border-b border-slate-300">
-              <td className={td}>{i.part_number ?? 'Custom item'}</td>
-              <td className={td}>{i.name}</td>
-              <td className={td}>{i.brand ?? '—'}</td>
-              <td className={td}>
-                {formatMoney(i.unit_price_cents, inv.currency)}
-              </td>
-              <td className={td}>{i.quantity}</td>
-              <td className={td}>
-                {formatMoney(i.line_total_cents, inv.currency)}
-              </td>
+      <ScrollRegion label="Invoice lines table">
+        <table className="w-full border-collapse">
+          <caption className="mb-1 text-left text-sm">Invoice lines</caption>
+          <thead>
+            <tr className="border-b border-slate-400 bg-slate-100">
+              {[
+                'Part number',
+                'Name',
+                'Brand',
+                'Unit price',
+                'Quantity',
+                'Line total',
+              ].map((h) => (
+                <th key={h} scope="col" className={th}>
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {inv.items.map((i) => (
+              <tr key={i.position} className="border-b border-slate-300">
+                <td className={td}>{i.part_number ?? 'Custom item'}</td>
+                <td className={td}>{i.name}</td>
+                <td className={td}>{i.brand ?? '—'}</td>
+                <td className={td}>
+                  {formatMoney(i.unit_price_cents, inv.currency)}
+                </td>
+                <td className={td}>{i.quantity}</td>
+                <td className={td}>
+                  {formatMoney(i.line_total_cents, inv.currency)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
       <Totals inv={inv} />
 
       {(seller.payment_terms_text || bank.iban) && (
@@ -322,8 +325,8 @@ export default function InvoiceDetailPage({
   if (!q.data)
     return (
       <div role="status" aria-busy="true" aria-label="Loading invoice">
-        <div className="mb-2 h-8 w-1/2 animate-pulse rounded bg-slate-200" />
-        <div className="h-32 animate-pulse rounded bg-slate-200" />
+        <div className="mb-2 h-8 w-1/2 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
+        <div className="h-32 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
       </div>
     );
   return <Detail inv={q.data} basePath={basePath} />;

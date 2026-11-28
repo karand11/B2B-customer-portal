@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import ScrollRegion from '../../components/ScrollRegion';
+import { useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
@@ -9,7 +10,7 @@ import { ApiError } from '../../lib/api';
 import { formatMoney } from '../../lib/format';
 import { poReferenceSchema } from '../../lib/poReference';
 import CatalogError from '../catalog/CatalogError';
-import { usePlaceOrder } from '../orders/api';
+import { priceChangeCart, usePlaceOrder } from '../orders/api';
 import { resetCart, useCart } from './api';
 
 // Same rules as the API (contract: POST /orders). The server stays the authority.
@@ -23,6 +24,15 @@ export default function CheckoutPage() {
   const qc = useQueryClient();
   const [placed, setPlaced] = useState(false);
   const inFlight = useRef(false); // sync guard: a double click beats any re-render
+  // Set by a 409: the fresh cart is already on screen, the buyer must click again.
+  const [priceChange, setPriceChange] = useState<{
+    was: number;
+    now: number;
+  } | null>(null);
+  const priceRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (priceChange) priceRef.current?.focus();
+  }, [priceChange]);
   const {
     register,
     handleSubmit,
@@ -34,22 +44,40 @@ export default function CheckoutPage() {
   });
 
   const submit = (v: Values) => {
-    if (inFlight.current) return;
+    const shown = cart.data;
+    if (inFlight.current || !shown) return;
     inFlight.current = true;
-    place.mutate(v.po_reference || undefined, {
-      onSuccess: (res) => {
-        setPlaced(true); // batched with the cart reset: no bounce to /cart
-        resetCart(qc, res.data.currency);
-        navigate(`/orders/${res.data.number}`, { state: { placed: true } });
+    setPriceChange(null);
+    place.mutate(
+      {
+        po_reference: v.po_reference || undefined,
+        expected_subtotal_cents: shown.subtotal_cents,
       },
-      onError: (e) => {
-        if (e instanceof ApiError && e.status === 422 && e.errors.po_reference)
-          setError('po_reference', { message: e.errors.po_reference[0] });
+      {
+        onSuccess: (res) => {
+          setPlaced(true); // batched with the cart reset: no bounce to /cart
+          resetCart(qc, res.data.currency);
+          navigate(`/orders/${res.data.number}`, { state: { placed: true } });
+        },
+        onError: (e) => {
+          if (
+            e instanceof ApiError &&
+            e.status === 422 &&
+            e.errors.po_reference
+          )
+            setError('po_reference', { message: e.errors.po_reference[0] });
+          const fresh = priceChangeCart(e);
+          if (fresh)
+            setPriceChange({
+              was: shown.subtotal_cents,
+              now: fresh.subtotal_cents,
+            });
+        },
+        onSettled: () => {
+          inFlight.current = false;
+        },
       },
-      onSettled: () => {
-        inFlight.current = false;
-      },
-    });
+    );
   };
 
   if (cart.isError && !cart.data)
@@ -59,7 +87,7 @@ export default function CheckoutPage() {
   if (!cart.data)
     return (
       <div role="status" aria-busy="true" aria-label="Loading cart">
-        <div className="h-24 animate-pulse rounded bg-slate-200" />
+        <div className="h-24 animate-pulse motion-reduce:animate-none rounded bg-slate-200" />
       </div>
     );
   const c = cart.data;
@@ -73,6 +101,7 @@ export default function CheckoutPage() {
   // Field errors are shown inline; everything else goes to the form alert.
   const otherError =
     cartErrors.length > 0 ||
+    priceChange ||
     (place.error instanceof ApiError && place.error.errors.po_reference)
       ? null
       : place.error;
@@ -80,51 +109,53 @@ export default function CheckoutPage() {
   return (
     <section>
       <h1 className="mb-4 text-2xl font-semibold">Checkout</h1>
-      <table className="mb-4 w-full border-collapse">
-        <caption className="sr-only">Order review</caption>
-        <thead>
-          <tr className="border-b border-slate-400 bg-slate-100">
-            {[
-              'Part number',
-              'Name',
-              'Quantity',
-              'Unit price',
-              'Line total',
-            ].map((h) => (
-              <th key={h} scope="col" className="px-3 py-2 text-left text-sm">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {c.items.map((l) => (
-            <tr
-              key={l.product_id}
-              className="border-b border-slate-300 text-sm"
-            >
-              <td className="px-3 py-2">{l.part_number}</td>
-              <td className="px-3 py-2">
-                {l.name}
-                {!l.available && (
-                  <p className="font-semibold text-red-800">
-                    Unavailable: remove it from your cart.
-                  </p>
-                )}
-              </td>
-              <td className="px-3 py-2">{l.quantity}</td>
-              <td className="px-3 py-2">
-                {formatMoney(l.unit_price_cents, c.currency)}
-              </td>
-              <td className="px-3 py-2">
-                {l.available
-                  ? formatMoney(l.line_total_cents, c.currency)
-                  : '-'}
-              </td>
+      <ScrollRegion label="Order review table">
+        <table className="mb-4 w-full border-collapse">
+          <caption className="sr-only">Order review</caption>
+          <thead>
+            <tr className="border-b border-slate-400 bg-slate-100">
+              {[
+                'Part number',
+                'Name',
+                'Quantity',
+                'Unit price',
+                'Line total',
+              ].map((h) => (
+                <th key={h} scope="col" className="px-3 py-2 text-left text-sm">
+                  {h}
+                </th>
+              ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {c.items.map((l) => (
+              <tr
+                key={l.product_id}
+                className="border-b border-slate-300 text-sm"
+              >
+                <td className="px-3 py-2">{l.part_number}</td>
+                <td className="px-3 py-2">
+                  {l.name}
+                  {!l.available && (
+                    <p className="font-semibold text-red-800">
+                      Unavailable: remove it from your cart.
+                    </p>
+                  )}
+                </td>
+                <td className="px-3 py-2">{l.quantity}</td>
+                <td className="px-3 py-2">
+                  {formatMoney(l.unit_price_cents, c.currency)}
+                </td>
+                <td className="px-3 py-2">
+                  {l.available
+                    ? formatMoney(l.line_total_cents, c.currency)
+                    : '-'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </ScrollRegion>
       <p className="mb-1 text-lg font-semibold">
         Total: {formatMoney(c.subtotal_cents, c.currency)}
       </p>
@@ -132,6 +163,20 @@ export default function CheckoutPage() {
         Taxes and shipping are not included. Your order will be reviewed and
         confirmed by our staff.
       </p>
+
+      {priceChange && (
+        <div
+          ref={priceRef}
+          role="alert"
+          tabIndex={-1}
+          className="mb-4 rounded border border-red-700 bg-red-50 p-3 text-red-800"
+        >
+          Prices in your cart changed. The new subtotal is{' '}
+          {formatMoney(priceChange.now, c.currency)} (was{' '}
+          {formatMoney(priceChange.was, c.currency)}). Review and place the
+          order again.
+        </div>
+      )}
 
       {cartErrors.length > 0 && (
         <div

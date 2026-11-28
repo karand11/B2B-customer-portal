@@ -410,11 +410,10 @@ export default function QuoteFormPage() {
                 </div>
                 <button
                   type="button"
-                  aria-label={`Remove item ${i + 1}`}
                   onClick={() => removeLine(i)}
                   className={btn}
                 >
-                  Remove line
+                  Remove line <span className="sr-only">{i + 1}</span>
                 </button>
               </div>
               <Err
@@ -469,6 +468,7 @@ export default function QuoteFormPage() {
         </label>
         <input
           id="quote-files"
+          className="block w-full max-w-full"
           type="file"
           multiple
           accept={ACCEPT_ATTR}

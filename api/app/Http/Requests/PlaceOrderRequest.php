@@ -16,10 +16,20 @@ class PlaceOrderRequest extends FormRequest
         return true; // role:customer middleware; OrderPolicy::create in the controller
     }
 
-    /** Only po_reference is read (rules in App\Support\PoReference); every other body field is ignored. */
+    /** Only po_reference and expected_subtotal_cents are read (PO rules in App\Support\PoReference); every other body field is ignored. */
     public function rules(): array
     {
-        return $this->poReferenceRules();
+        return $this->poReferenceRules() + [
+            // The subtotal of the cart the customer is looking at: a strict JSON integer (no string, no bool, no float). Absent or null = no check.
+            'expected_subtotal_cents' => ['bail', 'nullable', 'integer:strict', 'min:0', 'max:99999999999999'],
+        ];
+    }
+
+    public function expectedSubtotalCents(): ?int
+    {
+        $value = $this->validated('expected_subtotal_cents');
+
+        return $value === null ? null : (int) $value;
     }
 
     /** @return array<int, Closure> */

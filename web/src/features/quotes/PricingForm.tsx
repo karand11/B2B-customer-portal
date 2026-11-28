@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useState } from 'react';
 import { useFieldArray, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -104,64 +105,71 @@ export default function PricingForm({ quote }: { quote: QuoteDetail }) {
         Pricing
       </h2>
       <form onSubmit={(e) => void handleSubmit(submit)(e)} noValidate>
-        <table className="w-full border-collapse">
-          <caption className="sr-only">Unit prices</caption>
-          <thead>
-            <tr className="border-b border-slate-400 bg-slate-100">
-              {['Item', 'Quantity', 'Unit price', 'Line total (preview)'].map(
-                (h) => (
-                  <th
-                    key={h}
-                    scope="col"
-                    className={`${cell} text-left font-semibold`}
+        <ScrollRegion label="Unit prices table">
+          <table className="w-full border-collapse">
+            <caption className="sr-only">Unit prices</caption>
+            <thead>
+              <tr className="border-b border-slate-400 bg-slate-100">
+                {['Item', 'Quantity', 'Unit price', 'Line total (preview)'].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      scope="col"
+                      className={`${cell} text-left font-semibold`}
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody>
+              {fields.map((f, i) => {
+                const it = quote.items[i];
+                const err = errors.prices?.[i]?.value?.message;
+                const cents = parsePrice(prices?.[i]?.value ?? '');
+                return (
+                  <tr
+                    key={f.id}
+                    className="border-b border-slate-300 align-top"
                   >
-                    {h}
-                  </th>
-                ),
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {fields.map((f, i) => {
-              const it = quote.items[i];
-              const err = errors.prices?.[i]?.value?.message;
-              const cents = parsePrice(prices?.[i]?.value ?? '');
-              return (
-                <tr key={f.id} className="border-b border-slate-300 align-top">
-                  <td className={cell}>
-                    {it.part_number ?? 'Custom item'}: {it.name}
-                  </td>
-                  <td className={cell}>{it.quantity}</td>
-                  <td className={cell}>
-                    <input
-                      inputMode="decimal"
-                      autoComplete="off"
-                      aria-label={`Unit price for item ${it.position}`}
-                      aria-invalid={err ? true : undefined}
-                      aria-describedby={err ? `price-${f.id}-error` : undefined}
-                      className="w-32 rounded border border-slate-500 px-2 py-1"
-                      {...register(`prices.${i}.value`)}
-                    />
-                    {err && (
-                      <p
-                        id={`price-${f.id}-error`}
-                        role="alert"
-                        className="mt-1 text-sm text-red-700"
-                      >
-                        {err}
-                      </p>
-                    )}
-                  </td>
-                  <td className={cell}>
-                    {typeof cents === 'number'
-                      ? formatMoney(cents * it.quantity, quote.currency)
-                      : '—'}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                    <td className={cell}>
+                      {it.part_number ?? 'Custom item'}: {it.name}
+                    </td>
+                    <td className={cell}>{it.quantity}</td>
+                    <td className={cell}>
+                      <input
+                        inputMode="decimal"
+                        autoComplete="off"
+                        aria-label={`Unit price for item ${it.position}`}
+                        aria-invalid={err ? true : undefined}
+                        aria-describedby={
+                          err ? `price-${f.id}-error` : undefined
+                        }
+                        className="w-32 rounded border border-slate-500 px-2 py-1"
+                        {...register(`prices.${i}.value`)}
+                      />
+                      {err && (
+                        <p
+                          id={`price-${f.id}-error`}
+                          role="alert"
+                          className="mt-1 text-sm text-red-700"
+                        >
+                          {err}
+                        </p>
+                      )}
+                    </td>
+                    <td className={cell}>
+                      {typeof cents === 'number'
+                        ? formatMoney(cents * it.quantity, quote.currency)
+                        : '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </ScrollRegion>
         <p className="mt-2 text-sm">
           Saved total: {priceOrAwaiting(quote.total_cents, quote.currency)} (the
           server calculates it when you save).

@@ -1,3 +1,4 @@
+import ScrollRegion from '../../components/ScrollRegion';
 import { useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../auth/AuthContext';
@@ -72,7 +73,7 @@ export default function InvoicesPage({ basePath = '' }: { basePath?: string }) {
         {[0, 1, 2, 3].map((i) => (
           <div
             key={i}
-            className="mb-2 h-8 animate-pulse rounded bg-slate-200"
+            className="mb-2 h-8 animate-pulse motion-reduce:animate-none rounded bg-slate-200"
           />
         ))}
       </div>
@@ -96,90 +97,93 @@ export default function InvoicesPage({ basePath = '' }: { basePath?: string }) {
     body = (
       <>
         <div
-          className={invoices.isPlaceholderData ? 'opacity-60' : undefined}
+          className={invoices.isPlaceholderData ? 'opacity-80' : undefined}
           aria-busy={invoices.isPlaceholderData}
         >
-          <table className="w-full border-collapse">
-            <caption className="sr-only">Invoices</caption>
-            <thead>
-              <tr className="border-b border-slate-400 bg-slate-100">
-                {[
-                  'Number',
-                  'Order',
-                  'PO reference',
-                  ...(isStaff ? ['Company'] : []),
-                  'Issued',
-                  'Due',
-                  'Status',
-                  'Total',
-                ].map((h) => (
-                  <th key={h} scope="col" className={th}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {list.data.map((i) => {
-                const overdue = i.status === 'overdue';
-                return (
-                  <tr
-                    key={i.id}
-                    data-status={i.status}
-                    className={`border-b border-slate-300 ${
-                      overdue
-                        ? 'bg-red-50'
-                        : i.status === 'void'
-                          ? 'text-slate-600'
-                          : ''
-                    }`}
-                  >
-                    <td
-                      className={`${td} ${overdue ? 'border-l-4 border-red-800' : ''}`}
+          <ScrollRegion label="Invoices table">
+            <table className="w-full border-collapse">
+              <caption className="sr-only">Invoices</caption>
+              <thead>
+                <tr className="border-b border-slate-400 bg-slate-100">
+                  {[
+                    'Number',
+                    'Order',
+                    'PO reference',
+                    ...(isStaff ? ['Company'] : []),
+                    'Issued',
+                    'Due',
+                    'Status',
+                    'Total',
+                  ].map((h) => (
+                    <th key={h} scope="col" className={th}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {list.data.map((i) => {
+                  const overdue = i.status === 'overdue';
+                  return (
+                    <tr
+                      key={i.id}
+                      data-status={i.status}
+                      className={`border-b border-slate-300 ${
+                        overdue
+                          ? 'bg-red-50'
+                          : i.status === 'void'
+                            ? 'text-slate-600'
+                            : ''
+                      }`}
                     >
-                      <Link
-                        to={`${basePath}/invoices/${i.id}`}
-                        className="text-blue-800 underline"
+                      <td
+                        className={`${td} ${overdue ? 'border-l-4 border-red-800' : ''}`}
                       >
-                        {i.number}
-                      </Link>
-                    </td>
-                    <td className={td}>
-                      <Link
-                        to={`${basePath}/orders/${i.order_number}`}
-                        className="text-blue-800 underline"
-                      >
-                        {i.order_number}
-                      </Link>
-                    </td>
-                    <td className={td}>{i.po_reference ?? '—'}</td>
-                    {isStaff && <td className={td}>{i.company.name}</td>}
-                    <td className={td}>{i.issue_date}</td>
-                    <td className={td}>
-                      {i.due_date}
-                      {i.days_overdue > 0 && (
-                        <span className="block font-semibold text-red-900">
-                          {i.days_overdue}{' '}
-                          {i.days_overdue === 1 ? 'day' : 'days'} overdue
-                        </span>
-                      )}
-                    </td>
-                    <td className={td}>
-                      <StatusBadge status={i.status} />
-                    </td>
-                    <td className={td}>
-                      {formatMoney(i.total_cents, i.currency)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                        <Link
+                          to={`${basePath}/invoices/${i.id}`}
+                          className="text-blue-800 underline"
+                        >
+                          {i.number}
+                        </Link>
+                      </td>
+                      <td className={td}>
+                        <Link
+                          to={`${basePath}/orders/${i.order_number}`}
+                          className="text-blue-800 underline"
+                        >
+                          {i.order_number}
+                        </Link>
+                      </td>
+                      <td className={td}>{i.po_reference ?? '—'}</td>
+                      {isStaff && <td className={td}>{i.company.name}</td>}
+                      <td className={td}>{i.issue_date}</td>
+                      <td className={td}>
+                        {i.due_date}
+                        {i.days_overdue > 0 && (
+                          <span className="block font-semibold text-red-900">
+                            {i.days_overdue}{' '}
+                            {i.days_overdue === 1 ? 'day' : 'days'} overdue
+                          </span>
+                        )}
+                      </td>
+                      <td className={td}>
+                        <StatusBadge status={i.status} />
+                      </td>
+                      <td className={td}>
+                        {formatMoney(i.total_cents, i.currency)}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </ScrollRegion>
         </div>
         {list.meta.last_page > 1 && (
           <Pagination
             page={list.meta.current_page}
             lastPage={list.meta.last_page}
+            perPage={list.meta.per_page}
             onPage={(page) => {
               update({ page });
               headingRef.current?.focus();

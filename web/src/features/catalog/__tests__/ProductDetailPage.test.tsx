@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Spec } from '../../../test/utils';
@@ -22,7 +22,9 @@ describe('product detail page', () => {
     expect(dl).toHaveTextContent('StockIn stock');
     expect(dl).toHaveTextContent('Price$1,250.50');
     expect(dl).toHaveTextContent('Single row, rubber sealed.');
-    expect(document.title).toBe('6205-2RS');
+    await waitFor(() =>
+      expect(document.title).toBe('6205-2RS - B2B Customer Portal'),
+    );
     expect(screen.queryByRole('button', { name: /quote/i })).toBeNull();
   });
 

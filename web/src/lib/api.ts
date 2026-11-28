@@ -4,20 +4,30 @@ export class ApiError extends Error {
   status: number;
   errors: FieldErrors;
   retryAfter: number | null;
+  /** X-Request-Id of the failed response, so support can find the log line. */
+  requestId: string | null;
+  /** The parsed JSON body (the checkout 409 carries the fresh `cart`). */
+  body: Record<string, unknown>;
 
   constructor(
     status: number,
     message: string,
     errors: FieldErrors = {},
     retryAfter: number | null = null,
+    extra: { requestId?: string | null; body?: Record<string, unknown> } = {},
   ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.errors = errors;
     this.retryAfter = retryAfter;
+    this.requestId = extra.requestId ?? null;
+    this.body = extra.body ?? {};
   }
 }
+
+// Same shape the server accepts and generates; anything else is not displayed.
+const REQUEST_ID = /^[A-Za-z0-9._-]{8,64}$/;
 
 let onUnauthorized: (() => void) | null = null;
 /** AuthProvider registers this so any 401 on a non-bootstrap call drops the session. */
@@ -33,18 +43,22 @@ function readXsrf(): string | null {
 }
 
 async function toApiError(res: Response): Promise<ApiError> {
-  let body: { message?: unknown; errors?: unknown } = {};
+  let body: Record<string, unknown> = {};
   try {
-    body = await res.json();
+    const json: unknown = await res.json();
+    if (json && typeof json === 'object')
+      body = json as Record<string, unknown>;
   } catch {
     // non-JSON error body: keep defaults
   }
   const retry = Number.parseInt(res.headers.get('Retry-After') ?? '', 10);
+  const rid = res.headers.get('X-Request-Id') ?? '';
   return new ApiError(
     res.status,
     typeof body.message === 'string' ? body.message : `HTTP ${res.status}`,
     (body.errors as FieldErrors | undefined) ?? {},
     Number.isFinite(retry) ? retry : null,
+    { requestId: REQUEST_ID.test(rid) ? rid : null, body },
   );
 }
 
@@ -149,7 +163,8 @@ export function describeError(err: unknown): string {
         err.message
       );
     }
-    return 'Something went wrong. Please try again.';
+    // Plain text only (never markup): the id is validated against REQUEST_ID above.
+    return `Something went wrong. Please try again.${err.requestId ? ` Reference: ${err.requestId}` : ''}`;
   }
   return 'Could not reach the server. Check your connection and try again.';
 }

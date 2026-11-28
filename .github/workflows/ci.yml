@@ -7,12 +7,42 @@ on:
   push:
   pull_request:
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Service images below are pinned by digest. Dependabot does not update digests inside workflow `services:`:
+# bump them by hand (pull the tag, read `docker image inspect --format '{{index .RepoDigests 0}}'`) when advisories require it.
 jobs:
+  lint-api:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: api
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: "8.3"
+          tools: composer
+          extensions: pdo_pgsql, mbstring, dom, fileinfo, iconv
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('api/composer.lock') }}
+          restore-keys: composer-
+      - run: composer install --no-interaction --prefer-dist
+      - run: ./vendor/bin/pint --test
+
   api:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:ce81150802644ddfac1db4da9e63be6f2a3818aa6ee98a7a28838aeea65dc37a
         env:
           POSTGRES_DB: portal_test
           POSTGRES_USER: portal
@@ -27,23 +57,36 @@ jobs:
         working-directory: api
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.3"
           tools: composer
           extensions: pdo_pgsql, mbstring, dom, fileinfo, iconv
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('api/composer.lock') }}
+          restore-keys: composer-
       - run: composer install --no-interaction --prefer-dist
       - run: cp .env.example .env && php artisan key:generate
-      - run: ./vendor/bin/pint --test
-      - run: ./vendor/bin/pest
+      # Parallel: 4 workers, one database per worker (portal_test_test_1..4; the CI database user is the
+      # superuser, so it may CREATE DATABASE). Measured locally: about 62% faster than serial (design 9.2).
+      - run: ./vendor/bin/pest --parallel --processes=4 --exclude-group=race
+      # The race tests TRUNCATE tables and spawn real child processes: serial, after the parallel step.
+      - run: ./vendor/bin/pest --group=race
 
   web:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
@@ -52,14 +95,19 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm test
-      - run: npm run build
+      # The build must stay free of the chunk-size warning (route-level code splitting, Phase 7 F5).
+      - name: Build (fails on a build error or a chunk-size warning)
+        shell: bash # explicit shell enables `pipefail`, so a failing build is not hidden by tee
+        run: |
+          npm run build 2>&1 | tee build.log
+          ! grep -i "chunks are larger" build.log
 
   e2e:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16@sha256:ce81150802644ddfac1db4da9e63be6f2a3818aa6ee98a7a28838aeea65dc37a
         env:
           POSTGRES_DB: portal_e2e
           POSTGRES_USER: portal
@@ -70,14 +118,17 @@ jobs:
           --health-cmd "pg_isready -U portal -d portal_e2e"
           --health-interval 5s --health-timeout 3s --health-retries 10
       mailpit:
-        image: axllent/mailpit
+        image: axllent/mailpit@sha256:23a2ef85bc50853ab3093645d1d64679afd8887e89da5e48a88940c172591a4e
         ports:
           - 1025:1025
           - 8025:8025
     env:
       CI: "true"
+      E2E_WEB: preview # run the whole suite against the production build with the enforced CSP
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
         with:
           php-version: "8.3"
@@ -90,6 +141,11 @@ jobs:
           cache-dependency-path: |
             web/package-lock.json
             e2e/package-lock.json
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('api/composer.lock') }}
+          restore-keys: composer-
       - run: composer install --no-interaction --prefer-dist
         working-directory: api
       - run: cp .env.example .env && php artisan key:generate
@@ -98,16 +154,87 @@ jobs:
         working-directory: web
       - run: npm ci
         working-directory: e2e
-      - run: npx playwright install --with-deps chromium
+      - id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+        working-directory: e2e
+      - id: pw-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+      - if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e
+      - if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium # OS libraries are not cached, only the browser
         working-directory: e2e
       - run: npx playwright test
         working-directory: e2e
+      # The Lighthouse gate (accessibility >= 0.90 on login, catalog, order history; desktop and mobile). It starts its own
+      # stack on 8100/5273 and reseeds portal_e2e, so it runs after the suite, never alongside it.
+      - run: npm run lighthouse
+        working-directory: e2e
+        env:
+          E2E_SKIP_BUILD: "1" # reuse web/dist built by the suite
+      # Traces contain cookies and demo credentials of an ephemeral runner: only uploaded when something failed.
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: failure()
         with:
           name: playwright-report
           path: |
             e2e/playwright-report
             e2e/test-results
-          retention-days: 7
+          retention-days: 3
           if-no-files-found: ignore
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: a11y-reports
+          path: e2e/a11y-reports
+          retention-days: 3
+          if-no-files-found: ignore
+
+  ops-drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16@sha256:ce81150802644ddfac1db4da9e63be6f2a3818aa6ee98a7a28838aeea65dc37a
+        env:
+          POSTGRES_DB: portal
+          POSTGRES_USER: portal
+          POSTGRES_PASSWORD: secret
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U portal -d portal"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: "5433"
+      PGUSER: portal
+      PGPASSWORD: secret
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # v2
+        with:
+          php-version: "8.3"
+          tools: composer
+          extensions: pdo_pgsql, mbstring, dom, fileinfo, iconv
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.composer/cache
+          key: composer-${{ hashFiles('api/composer.lock') }}
+          restore-keys: composer-
+      - run: composer install --no-interaction --prefer-dist
+        working-directory: api
+      - run: cp .env.example .env && php artisan key:generate && php artisan migrate:fresh --seed --force
+        working-directory: api
+      - name: Create sample private files
+        run: mkdir -p api/storage/app/private/quotes && echo "drill file one" > api/storage/app/private/quotes/a.txt && echo "x,y" > api/storage/app/private/quotes/b.csv
+      - name: Restore drill (backup, restore into a scratch database, compare everything, boot the app)
+        run: SOURCE_DB=portal REQUIRE_APP_CHECK=1 bash ops/backup/restore-drill.sh
+      - name: Least-privilege database roles
+        run: bash ops/db/verify-roles.sh

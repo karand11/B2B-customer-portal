@@ -28,6 +28,7 @@ export const ACTIONS = [
   'quote.accepted',
   'quote.declined',
   'quote.priced',
+  'quote.attachment_purged',
   'invoice.created',
   'invoice.paid',
   'invoice.voided',
@@ -36,6 +37,7 @@ export const ACTIONS = [
   'product.activated',
   'product.deactivated',
   'product.imported',
+  'product.import_updated',
   'company.created',
   'company.updated',
   'user.invited',
@@ -291,6 +293,7 @@ export default function AuditPage() {
           onSortChange={(sort) => set({ sort })}
           page={values.page}
           lastPage={list.data?.meta.last_page ?? 1}
+          perPage={list.data?.meta.per_page}
           total={list.data?.meta.total}
           onPageChange={(page) => set({ page })}
           isLoading={list.isPending}

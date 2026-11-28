@@ -224,7 +224,7 @@ describe('order detail', () => {
       screen.getByText(/NU206 \(Roller\): Quantity limit reached/),
     ).toBeInTheDocument();
     expect(
-      await screen.findByRole('link', { name: 'Cart, 1 item' }),
+      await screen.findByRole('link', { name: 'Cart 1 item' }),
     ).toBeInTheDocument();
   });
 

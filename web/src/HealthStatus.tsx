@@ -23,12 +23,14 @@ export default function HealthStatus() {
     retry: false,
   });
 
-  if (isPending) return <p role="status">Checking API status...</p>;
+  // Not live regions: a footer that re-announces on every page load or refetch is noise.
+  // Only a failure is announced.
+  if (isPending) return <p>Checking API status...</p>;
   if (isError || !data)
     return (
       <p role="alert" className="text-red-700">
         API unavailable. Please try again later.
       </p>
     );
-  return <p role="status">API status: {data.status}</p>;
+  return <p>API status: {data.status}</p>;
 }

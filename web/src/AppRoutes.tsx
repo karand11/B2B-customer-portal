@@ -1,3 +1,4 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import Layout from './components/Layout';
 import { GuestRoute, ProtectedRoute, RoleRoute } from './auth/guards';
@@ -13,25 +14,17 @@ import CartPage from './features/cart/CartPage';
 import CheckoutPage from './features/cart/CheckoutPage';
 import OrdersPage from './features/orders/OrdersPage';
 import OrderDetailPage from './features/orders/OrderDetailPage';
-import QuotesPage from './features/quotes/QuotesPage';
-import QuoteDetailPage from './features/quotes/QuoteDetailPage';
-import QuoteFormPage from './features/quotes/QuoteFormPage';
-import InvoicesPage from './features/invoices/InvoicesPage';
-import InvoiceDetailPage from './features/invoices/InvoiceDetailPage';
-import AdminLayout from './features/admin/AdminLayout';
-import DashboardPage from './features/admin/DashboardPage';
-import ProductsPage from './features/admin/ProductsPage';
-import ProductEditPage, {
-  ProductCreatePage,
-} from './features/admin/ProductFormPage';
-import ImportPage from './features/admin/ImportPage';
-import CompaniesPage from './features/admin/CompaniesPage';
-import CompanyDetailPage, {
-  CompanyNewPage,
-} from './features/admin/CompanyDetailPage';
-import UsersPage from './features/admin/UsersPage';
-import UserDetailPage from './features/admin/UserDetailPage';
-import AuditPage from './features/admin/AuditPage';
+
+// Login, home, catalog, cart, checkout and orders stay in the entry chunk; quotes,
+// invoices and the back office load on first visit (docs/phase-7-design.md 6.4).
+const QuotesPage = lazy(() => import('./features/quotes/QuotesPage'));
+const QuoteDetailPage = lazy(() => import('./features/quotes/QuoteDetailPage'));
+const QuoteFormPage = lazy(() => import('./features/quotes/QuoteFormPage'));
+const InvoicesPage = lazy(() => import('./features/invoices/InvoicesPage'));
+const InvoiceDetailPage = lazy(
+  () => import('./features/invoices/InvoiceDetailPage'),
+);
+const AdminRoutes = lazy(() => import('./features/admin/AdminRoutes'));
 
 export default function AppRoutes() {
   return (
@@ -60,39 +53,7 @@ export default function AppRoutes() {
           </Route>
           <Route path="/staff" element={<Navigate to="/admin" replace />} />
           <Route element={<RoleRoute roles={['staff', 'admin']} />}>
-            <Route path="/admin" element={<AdminLayout />}>
-              <Route index element={<DashboardPage />} />
-              <Route path="orders" element={<OrdersPage basePath="/admin" />} />
-              <Route
-                path="orders/:number"
-                element={<OrderDetailPage basePath="/admin" />}
-              />
-              <Route path="quotes" element={<QuotesPage basePath="/admin" />} />
-              <Route
-                path="quotes/:number"
-                element={<QuoteDetailPage basePath="/admin" />}
-              />
-              <Route
-                path="invoices"
-                element={<InvoicesPage basePath="/admin" />}
-              />
-              <Route
-                path="invoices/:id"
-                element={<InvoiceDetailPage basePath="/admin" />}
-              />
-              <Route path="products" element={<ProductsPage />} />
-              <Route path="products/new" element={<ProductCreatePage />} />
-              <Route path="products/import" element={<ImportPage />} />
-              <Route path="products/:id" element={<ProductEditPage />} />
-              <Route path="companies" element={<CompaniesPage />} />
-              <Route path="companies/new" element={<CompanyNewPage />} />
-              <Route path="companies/:id" element={<CompanyDetailPage />} />
-              <Route element={<RoleRoute roles={['admin']} />}>
-                <Route path="users" element={<UsersPage />} />
-                <Route path="users/:id" element={<UserDetailPage />} />
-                <Route path="audit-log" element={<AuditPage />} />
-              </Route>
-            </Route>
+            <Route path="/admin/*" element={<AdminRoutes />} />
           </Route>
         </Route>
         <Route path="*" element={<NotFoundPage />} />

@@ -26,9 +26,9 @@ class AuditRedactor
 
     public const METADATA = [
         'order' => [],
-        'quote' => ['order_number', 'lines_changed'],
+        'quote' => ['order_number', 'lines_changed', 'file_name', 'size_bytes', 'sha256'],
         'invoice' => ['invoice_number', 'order_number'],
-        'product' => ['description_changed'],
+        'product' => ['description_changed', 'import_id', 'file_name'],
         'company' => ['billing_address_changed'],
         'user' => [],
         'import' => ['file_name', 'sha256', 'rows_read', 'created', 'updated', 'bad_rows', 'applied_rows', 'skipped_rows'],

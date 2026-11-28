@@ -6,6 +6,8 @@ import { deferred, loc } from '../../catalog/__tests__/fixtures';
 import { CART, ME, P1, cartOf, line, order, setupApp } from './fixtures';
 
 const POST = 'POST /api/v1/orders';
+// Two P1 at 1250.50 each: the subtotal on screen, sent so a price change is never silent.
+const SUB = 250100;
 const full = { [CART]: { body: cartOf([line(P1, 2)]) } };
 const place = (u: ReturnType<typeof userEvent.setup>) =>
   u.click(screen.getByRole('button', { name: 'Place order' }));
@@ -23,7 +25,7 @@ describe('checkout', () => {
       'GET /api/v1/orders/ORD-K7Q2M-X9PA3': { body: { data: order() } },
     });
     await screen.findByRole('heading', { name: 'Checkout' });
-    await screen.findByRole('link', { name: 'Cart, 1 item' });
+    await screen.findByRole('link', { name: 'Cart 1 item' });
     await place(user);
 
     const banner = await screen.findByText(
@@ -31,10 +33,10 @@ describe('checkout', () => {
     );
     expect(banner).toHaveFocus();
     expect(loc()).toBe('/orders/ORD-K7Q2M-X9PA3');
-    // No body at all: nothing for the client to tamper with.
-    expect(api.to(POST)[0].body).toBeNull();
+    // Only the PO and the subtotal the user saw: never lines or prices.
+    expect(api.to(POST)[0].body).toEqual({ expected_subtotal_cents: SUB });
     await waitFor(() =>
-      expect(screen.queryByRole('link', { name: /^Cart, / })).toBeNull(),
+      expect(screen.queryByRole('link', { name: /^Cart \d/ })).toBeNull(),
     );
   });
 
@@ -75,7 +77,10 @@ describe('checkout', () => {
       '  PO-4711/A  ',
     );
     await place(user);
-    expect(api.to(POST)[0].body).toEqual({ po_reference: 'PO-4711/A' });
+    expect(api.to(POST)[0].body).toEqual({
+      po_reference: 'PO-4711/A',
+      expected_subtotal_cents: SUB,
+    });
     // Rendered as a text node: the markup is visible text, not an element.
     expect(
       await screen.findByText(/PO reference: <b>x<\/b>/),
@@ -119,7 +124,10 @@ describe('checkout', () => {
       );
       await place(user);
       await screen.findByText(/was received/);
-      expect(api.to(POST)[0].body).toEqual({ po_reference: ok });
+      expect(api.to(POST)[0].body).toEqual({
+        po_reference: ok,
+        expected_subtotal_cents: SUB,
+      });
     },
   );
 
@@ -134,7 +142,7 @@ describe('checkout', () => {
     await user.type(screen.getByLabelText('PO reference (optional)'), '   ');
     await place(user);
     await screen.findByText(/was received/);
-    expect(api.to(POST)[0].body).toBeNull();
+    expect(api.to(POST)[0].body).toEqual({ expected_subtotal_cents: SUB });
   });
 
   it('a server 422 po_reference error shows inline and keeps the form usable', async () => {

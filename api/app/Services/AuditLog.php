@@ -16,9 +16,9 @@ class AuditLog
     /** Every action the log can contain (the contract vocabulary); the viewer validates its `action` filter against it. */
     public const ACTIONS = [
         'order.status_changed',
-        'quote.reviewed', 'quote.sent', 'quote.reopened', 'quote.rejected', 'quote.accepted', 'quote.declined', 'quote.priced',
+        'quote.reviewed', 'quote.sent', 'quote.reopened', 'quote.rejected', 'quote.accepted', 'quote.declined', 'quote.priced', 'quote.attachment_purged',
         'invoice.created', 'invoice.paid', 'invoice.voided',
-        'product.created', 'product.updated', 'product.activated', 'product.deactivated', 'product.imported',
+        'product.created', 'product.updated', 'product.activated', 'product.deactivated', 'product.imported', 'product.import_updated',
         'company.created', 'company.updated',
         'user.invited', 'user.invitation_resent', 'user.invitation_revoked', 'user.invitation_accepted', 'user.updated',
         'user.assignment_changed', 'user.deactivated', 'user.reactivated', 'user.password_reset_requested',
@@ -26,7 +26,8 @@ class AuditLog
 
     /**
      * Transaction depth that existed before the test harness wrapped each test in one. Always 0 in production; TestCase sets it,
-     * so a test proves that the CALLER opened its own transaction, not just the ambient one.
+     * so a test proves that the CALLER opened its own transaction, not just the ambient one. Honoured ONLY while unit tests run
+     * (see assertInTransaction()): a stray assignment in app code cannot switch the safety check off.
      */
     public static int $baseTransactionLevel = 0;
 
@@ -43,10 +44,48 @@ class AuditLog
         string $action, string $subjectType, string $subjectId, ?string $label, ?User $actor,
         array $before = [], array $after = [], array $metadata = [], ?int $companyId = null, bool $always = false,
     ): void {
-        if (DB::transactionLevel() <= self::$baseTransactionLevel) {
-            throw new LogicException('AuditLog::record() must be called inside the transaction of the change it records.');
+        self::assertInTransaction();
+
+        $row = self::row($action, $subjectType, $subjectId, $label, $actor, $before, $after, $metadata, $companyId, $always);
+        $row === null || DB::table('audit_log')->insert($row);
+    }
+
+    /**
+     * One INSERT per chunk of 500 rows for many subjects of one action (an applied CSV import): same redaction and no-op rules as record(),
+     * same transaction rule. Each entry is [subjectId, label, before, after].
+     *
+     * @param  list<array{string, ?string, array<string, mixed>, array<string, mixed>}>  $entries
+     * @param  array<string, mixed>  $metadata
+     */
+    public static function recordMany(string $action, string $subjectType, array $entries, ?User $actor, array $metadata = [], ?int $companyId = null): void
+    {
+        self::assertInTransaction();
+
+        $rows = [];
+        foreach ($entries as [$subjectId, $label, $before, $after]) {
+            $row = self::row($action, $subjectType, $subjectId, $label, $actor, $before, $after, $metadata, $companyId, false);
+            $row === null || $rows[] = $row;
         }
 
+        foreach (array_chunk($rows, 500) as $chunk) {
+            DB::table('audit_log')->insert($chunk);
+        }
+    }
+
+    private static function assertInTransaction(): void
+    {
+        $base = app()->runningUnitTests() ? self::$baseTransactionLevel : 0;
+
+        if (DB::transactionLevel() <= $base) {
+            throw new LogicException('AuditLog::record() must be called inside the transaction of the change it records.');
+        }
+    }
+
+    /** @return array<string, mixed>|null the row to insert, or null when there is nothing to record */
+    private static function row(
+        string $action, string $subjectType, string $subjectId, ?string $label, ?User $actor,
+        array $before, array $after, array $metadata, ?int $companyId, bool $always,
+    ): ?array {
         $before = AuditRedactor::filter($subjectType, $before, AuditRedactor::CHANGES);
         $after = AuditRedactor::filter($subjectType, $after, AuditRedactor::CHANGES);
         $metadata = AuditRedactor::filter($subjectType, $metadata, AuditRedactor::METADATA);
@@ -60,12 +99,12 @@ class AuditLog
         }
 
         if ($before === [] && $after === [] && $metadata === [] && ! $always) {
-            return;
+            return null;
         }
 
         $changes = ($before === [] && $after === []) ? new \stdClass : ['before' => (object) $before, 'after' => (object) $after];
 
-        DB::table('audit_log')->insert([
+        return [
             'occurred_at' => now()->utc()->format('Y-m-d H:i:s.u'),
             'actor_user_id' => $actor?->id,
             'actor_role' => $actor?->primaryRole() ?? 'system',
@@ -76,6 +115,6 @@ class AuditLog
             'company_id' => $companyId,
             'changes' => json_encode($changes, JSON_THROW_ON_ERROR),
             'metadata' => json_encode((object) $metadata, JSON_THROW_ON_ERROR),
-        ]);
+        ];
     }
 }

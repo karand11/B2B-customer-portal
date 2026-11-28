@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Enums\OrderStatus;
+use App\Http\Requests\Concerns\ChecksPageWindow;
 use App\Models\Order;
 use Closure;
 use Illuminate\Contracts\Validation\Validator;
@@ -11,6 +12,8 @@ use Illuminate\Validation\Rule;
 
 class ListOrdersRequest extends FormRequest
 {
+    use ChecksPageWindow;
+
     public function authorize(): bool
     {
         return true; // role middleware and the Order::visibleTo scope do the access control
@@ -39,7 +42,7 @@ class ListOrdersRequest extends FormRequest
     /** @return array<int, Closure> */
     public function after(): array
     {
-        return [function (Validator $validator) {
+        return [fn (Validator $validator) => $this->checkPageWindow($validator, 20), function (Validator $validator) {
             [$from, $to] = [$this->input('from'), $this->input('to')];
 
             if (is_string($from) && is_string($to) && ! $validator->errors()->hasAny(['from', 'to']) && $from > $to) {

@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ChecksPageWindow;
 use App\Models\Category;
 use App\Models\Product;
 use App\Support\PartNumber;
@@ -12,6 +13,8 @@ use Illuminate\Validation\Rule;
 
 class ListProductsRequest extends FormRequest
 {
+    use ChecksPageWindow;
+
     public const SORTS = [
         'part_number', 'brand', 'inner_diameter', 'outer_diameter', 'width', 'price',
         '-part_number', '-brand', '-inner_diameter', '-outer_diameter', '-width', '-price',
@@ -56,7 +59,7 @@ class ListProductsRequest extends FormRequest
     /** @return array<int, Closure> */
     public function after(): array
     {
-        return [function (Validator $validator) {
+        return [fn (Validator $validator) => $this->checkPageWindow($validator, 24), function (Validator $validator) {
             foreach (array_keys(self::RANGES) as $prefix) {
                 $min = $this->input($prefix.'_min');
                 $max = $this->input($prefix.'_max');

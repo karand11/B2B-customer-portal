@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { PER_PAGE, clampPage } from '../../lib/pageWindow';
 import { isRealDate } from '../orders/urlState';
 import type { InvoiceStatus } from './api';
 
@@ -73,7 +74,7 @@ export function parseQuery(sp: URLSearchParams): InvoiceQuery {
     company_id: /^[1-9]\d{0,17}$/.test(company) ? company : '',
     due_within_days: /^([0-9]|[12]\d|30)$/.test(within) ? within : '',
     sort: sort.success ? sort.data : DEFAULT_SORT,
-    page: page.success ? page.data : 1,
+    page: page.success ? clampPage(page.data, PER_PAGE.list) : 1,
   };
 }
 

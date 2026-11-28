@@ -110,7 +110,7 @@ it('does not render a PDF for HEAD: it is refused with 405 before any invoice lo
     DB::flushQueryLog();
     DB::enableQueryLog();
 
-    $response = loginAs($this->w->a1)->call('HEAD', "/api/v1/invoices/{$invoice->public_id}/pdf");
+    $response = loginAs($this->w->a1)->call('HEAD', "/api/v1/invoices/{$invoice->public_id}/pdf", [], [], [], ['HTTP_ORIGIN' => 'http://localhost:5173']);
 
     $sql = implode(' ', array_column(DB::getQueryLog(), 'query'));
     DB::disableQueryLog();
@@ -118,6 +118,7 @@ it('does not render a PDF for HEAD: it is refused with 405 before any invoice lo
     // Guests and roleless users never get past the usual 401 / 403.
     $this->app['auth']->forgetGuards();
     expect($this->call('HEAD', "/api/v1/invoices/{$invoice->public_id}/pdf")->getStatusCode())->toBe(401);
+    $this->flushSession();
     loginAs($this->w->a1)->get("/api/v1/invoices/{$invoice->public_id}/pdf")->assertOk();
 });
 

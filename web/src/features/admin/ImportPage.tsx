@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import ScrollRegion from '../../components/ScrollRegion';
 import ConfirmDialog from '../../components/ConfirmDialog';
+import { useFocusOnMount } from '../../components/pageFocus';
 import { ApiError, describeError } from '../../lib/api';
 import {
   useApplyImport,
@@ -104,7 +106,7 @@ function Preview({
       )}
 
       {preview.errors.length > 0 && (
-        <div className="mb-4 overflow-x-auto">
+        <ScrollRegion label="Invalid rows table" className="mb-4">
           <table className="w-full border-collapse">
             <caption className="mb-1 text-left font-semibold">
               Invalid rows
@@ -135,7 +137,7 @@ function Preview({
             </tbody>
           </table>
           {hidden > 0 && <p className="mt-1 text-sm">and {hidden} more</p>}
-        </div>
+        </ScrollRegion>
       )}
 
       {bad > 0 && (
@@ -212,9 +214,13 @@ export default function ImportPage() {
   const step = result ? 3 : data ? 2 : 1;
 
   // Focus follows the wizard: the heading announces each new step.
+  const focusOnMount = useFocusOnMount();
+  const shownStep = useRef(step);
   useEffect(() => {
-    headingRef.current?.focus();
-  }, [step]);
+    // A new wizard step always moves focus; the page mount only after a navigation.
+    if (step !== shownStep.current || focusOnMount) headingRef.current?.focus();
+    shownStep.current = step;
+  }, [step, focusOnMount]);
 
   const upload = (e: React.FormEvent) => {
     e.preventDefault();
@@ -259,6 +265,7 @@ export default function ImportPage() {
             <input
               id="csv-file"
               type="file"
+              className="block w-full max-w-full"
               accept=".csv,text/csv"
               aria-describedby="csv-hint"
               onChange={(e) => setFile(e.target.files?.[0] ?? null)}

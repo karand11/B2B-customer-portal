@@ -110,6 +110,7 @@ export default function CompaniesPage() {
         onSortChange={(sort) => set({ sort })}
         page={values.page}
         lastPage={list.data?.meta.last_page ?? 1}
+        perPage={list.data?.meta.per_page}
         total={list.data?.meta.total}
         onPageChange={(page) => set({ page })}
         isLoading={list.isPending}

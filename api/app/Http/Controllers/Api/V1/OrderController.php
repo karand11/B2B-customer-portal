@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Enums\OrderStatus;
+use App\Exceptions\CartPricesChanged;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ListOrdersRequest;
 use App\Http\Requests\PlaceOrderRequest;
@@ -40,10 +41,21 @@ class OrderController extends Controller
         return new OrderDetailResource($this->detail($order));
     }
 
-    public function store(PlaceOrderRequest $request, PlaceOrder $place): JsonResponse
+    public function store(PlaceOrderRequest $request, PlaceOrder $place, CartService $cart): JsonResponse
     {
         $this->authorize('create', Order::class);
-        $order = $place->handle($request->user(), $request->poReference());
+
+        try {
+            $order = $place->handle($request->user(), $request->poReference(), $request->expectedSubtotalCents());
+        } catch (CartPricesChanged) {
+            // Nothing was created and the cart is untouched: show the customer what it costs now.
+            $message = 'The prices in your cart changed. Review the cart and place the order again.';
+
+            return response()->json([
+                'message' => $message, 'errors' => ['expected_subtotal_cents' => [$message]],
+                'cart' => (new CartResource($cart->items($request->user())))->resolve(),
+            ], 409);
+        }
 
         return (new OrderDetailResource($this->detail($order)))->response()->setStatusCode(201);
     }

@@ -1,11 +1,14 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 const FOCUSABLE =
-  'button:not([disabled]), a[href], input:not([disabled]), textarea:not([disabled]), select:not([disabled])';
+  'button:not([disabled]), a[href], input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 /**
- * Modal confirm: focus moves in (to the safe "keep" button), Tab is trapped,
- * Escape cancels, focus returns to whatever opened it.
+ * Modal confirm: rendered in a portal on document.body, everything else is made
+ * `inert` while it is open (no focus, clicks or screen reader access behind it),
+ * focus moves in (to the safe "keep" button), Tab is trapped, Escape cancels and
+ * focus returns to whatever opened it.
  */
 export default function ConfirmDialog({
   title,
@@ -28,13 +31,25 @@ export default function ConfirmDialog({
   onCancel: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const overlayRef = useRef<HTMLDivElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
   const titleId = useId();
+  const bodyId = useId();
 
   useEffect(() => {
     const opener = document.activeElement as HTMLElement | null;
+    const silenced: Element[] = [];
+    for (const el of document.body.children) {
+      if (el === overlayRef.current || el.hasAttribute('inert')) continue;
+      el.setAttribute('inert', '');
+      silenced.push(el);
+    }
     cancelRef.current?.focus();
-    return () => opener?.focus();
+    return () => {
+      // Order matters: an inert opener cannot take focus back.
+      silenced.forEach((el) => el.removeAttribute('inert'));
+      opener?.focus();
+    };
   }, []);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -48,7 +63,11 @@ export default function ConfirmDialog({
     if (!items?.length) return;
     const first = items[0];
     const last = items[items.length - 1];
-    if (e.shiftKey && document.activeElement === first) {
+    if (!Array.from(items).includes(document.activeElement as HTMLElement)) {
+      // Focus is on the dialog box itself: enter the loop from the right end.
+      e.preventDefault();
+      (e.shiftKey ? last : first).focus();
+    } else if (e.shiftKey && document.activeElement === first) {
       e.preventDefault();
       last.focus();
     } else if (!e.shiftKey && document.activeElement === last) {
@@ -57,20 +76,27 @@ export default function ConfirmDialog({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4">
+  return createPortal(
+    <div
+      ref={overlayRef}
+      className="fixed inset-0 z-10 flex items-center justify-center bg-black/50 p-4"
+    >
       <div
         ref={ref}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
+        aria-describedby={bodyId}
+        tabIndex={-1}
         onKeyDown={onKeyDown}
-        className="w-full max-w-md rounded bg-white p-6 shadow-lg"
+        className="w-full max-w-md rounded bg-white p-6 shadow-lg outline-none"
       >
         <h2 id={titleId} className="mb-2 text-lg font-semibold">
           {title}
         </h2>
-        <div className="mb-4">{children}</div>
+        <div id={bodyId} className="mb-4">
+          {children}
+        </div>
         <div className="flex gap-2">
           <button
             type="button"
@@ -92,6 +118,7 @@ export default function ConfirmDialog({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

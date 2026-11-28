@@ -69,16 +69,38 @@ class QuoteAttachments
         return $attachment;
     }
 
-    /** Hard delete: the row inside the transaction, the file after commit (a failed removal is logged, never a 500). */
+    /**
+     * Hard delete: the row inside the transaction, the file after commit (a failed removal is logged, never a 500).
+     * A customer may delete only while the quote is open (the workflow refuses otherwise). Staff may PURGE in any status; every purge
+     * leaves an audit row (file name, size, sha256: no content).
+     */
     public function delete(QuoteRequest $quote, User $user, QuoteAttachment $attachment): void
     {
-        $this->workflow->run($quote, 'attach', $user, fn (QuoteRequest $locked) => QuoteAttachment::where('quote_request_id', $locked->id)
-            ->whereKey($attachment->id)->delete() === 1 || abort(404));
+        if ($user->isStaff()) {
+            $this->purge($quote, $user, $attachment);
+        } else {
+            $this->workflow->run($quote, 'attach', $user, fn (QuoteRequest $locked) => QuoteAttachment::where('quote_request_id', $locked->id)
+                ->whereKey($attachment->id)->delete() === 1 || abort(404));
+        }
 
         try {
             Storage::disk(config('quotes.attachments.disk'))->delete($attachment->storage_path);
         } catch (Throwable $e) {
-            Log::error('Could not remove a quote attachment file.', ['attachment' => $attachment->public_id, 'error' => $e->getMessage()]);
+            Log::error('Could not remove a quote attachment file.', ['attachment' => $attachment->public_id, 'exception' => $e::class]);
         }
+    }
+
+    private function purge(QuoteRequest $quote, User $staff, QuoteAttachment $attachment): void
+    {
+        DB::transaction(function () use ($quote, $staff, $attachment) {
+            $locked = QuoteRequest::whereKey($quote->id)->lockForUpdate()->firstOrFail();
+            $row = QuoteAttachment::where('quote_request_id', $locked->id)->whereKey($attachment->id)->first() ?? abort(404);
+            $row->delete();
+
+            AuditLog::record(
+                'quote.attachment_purged', 'quote', $locked->quote_number, $locked->quote_number, $staff, [], [],
+                ['file_name' => $row->original_name, 'size_bytes' => $row->size_bytes, 'sha256' => $row->sha256], $locked->company_id,
+            );
+        });
     }
 }
