@@ -47,5 +47,12 @@ fi
 [ "$exists" = "1" ] || sql postgres "create database \"$target\"" >/dev/null
 
 echo "restoring $dump into $target ..."
-pgx pg_restore --no-owner --no-privileges --exit-on-error $(pgflags) -d "$target" < "$dump"
+# Restore through SQL (pg_restore -f -) instead of `pg_restore -d`: a client NEWER than the server (pg_dump/pg_restore 17+
+# against a 16 server, common on CI runners and admin laptops) writes `SET transaction_timeout = 0;`, which an older
+# server rejects ("unrecognized configuration parameter") and `--exit-on-error` would then abort the whole restore.
+# That one parameter is dropped; every other error still stops the restore (psql ON_ERROR_STOP, single transaction).
+# With `pipefail` a failure in pg_restore itself (damaged archive) also fails the pipeline.
+pgx pg_restore --no-owner --no-privileges -f - < "$dump" \
+  | sed '/^SET transaction_timeout = /d' \
+  | pgx psql -X -q --single-transaction -v ON_ERROR_STOP=1 $(pgflags) -d "$target" >/dev/null
 echo "ok"
